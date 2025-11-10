@@ -23,7 +23,8 @@ func ChunkDocument(doc Document, maxChunkSize int) []Chunk {
 	if docType == "markdown" {
 		// split by markdown headers
 		sections = splitByHeaders(doc.Content)
-	} else if docType == "go" || docType == "javascript" || docType == "typescript" {
+	} else if docType == "go" || docType == "javascript" || docType == "typescript" ||
+		docType == "python" || docType == "java" || docType == "c" {
 		// split code by functions/methods
 		sections = splitByFunctions(doc.Content)
 	} else {
@@ -187,8 +188,16 @@ func splitByFunctions(content string) []string {
 		// detect function start (simple heuristic)
 		// go: func keyword
 		// js/ts: function keyword, arrow functions, method definitions
+		// python: def keyword
+		// java: public/private/protected methods, class definitions
+		// c: function definitions with return type
 		isFunctionStart := strings.HasPrefix(trimmed, "func ") ||
 			strings.HasPrefix(trimmed, "function ") ||
+			strings.HasPrefix(trimmed, "def ") ||
+			strings.HasPrefix(trimmed, "class ") ||
+			strings.HasPrefix(trimmed, "public ") ||
+			strings.HasPrefix(trimmed, "private ") ||
+			strings.HasPrefix(trimmed, "protected ") ||
 			(strings.Contains(trimmed, "=> {") || strings.Contains(trimmed, "=>")) ||
 			(i > 0 && strings.Contains(trimmed, "(") && strings.Contains(trimmed, ")") && strings.Contains(trimmed, "{"))
 

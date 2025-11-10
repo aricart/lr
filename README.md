@@ -22,7 +22,7 @@ humans or tools with factual and almost hallucination-free constructs.
 ## features
 
 - index local directories or git repositories
-- intelligent code-aware chunking for go, javascript, and typescript
+- intelligent code-aware chunking for go, javascript, typescript, python, java, and c
 - markdown documentation support
 - multiple embedding providers:
   - openai (text-embedding-3-small)
@@ -588,7 +588,7 @@ lr query "examples of error handling patterns"
 
 ## supported file types
 
-- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`
+- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.java`, `.c`, `.h`
 - **documentation**: `.md`
 
 ## example workflow
@@ -665,7 +665,7 @@ then in claude code, just ask questions naturally:
 ## roadmap
 
 - [ ] url support for `--src` (auto-clone repos)
-- [ ] more languages (python, rust, java, c#)
+- [ ] more languages (rust, c++, c#, ruby, php)
 - [ ] ast-based parsing for better chunking
 - [ ] incremental updates (only re-index changed files)
 - [ ] parallel embedding generation

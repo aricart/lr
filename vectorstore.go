@@ -96,10 +96,18 @@ func (vs *VectorStore) Save(filepath string) error {
 		defer f.Close()
 
 		gw := gzip.NewWriter(f)
-		defer gw.Close()
 
-		_, err = gw.Write(data)
-		return err
+		if _, err := gw.Write(data); err != nil {
+			gw.Close()
+			return err
+		}
+
+		// must close gzip writer to flush all data before file closes
+		if err := gw.Close(); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
 	// otherwise save as plain json (backward compatibility)

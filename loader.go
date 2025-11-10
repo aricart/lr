@@ -29,9 +29,9 @@ func LoadMarkdownFiles(rootDir string) ([]Document, error) {
 	return LoadFilesByExtensions(rootDir, []string{".md"}, "markdown")
 }
 
-// LoadCodeFiles loads code files (Go, JavaScript, TypeScript) from the given directory
+// LoadCodeFiles loads code files (Go, JavaScript, TypeScript, Python, Java, C) from the given directory
 func LoadCodeFiles(rootDir string) ([]Document, error) {
-	return LoadFilesByExtensions(rootDir, []string{".go", ".js", ".ts", ".jsx", ".tsx"}, "code")
+	return LoadFilesByExtensions(rootDir, []string{".go", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".h"}, "code")
 }
 
 // LoadFilesByExtensions loads files with specific extensions from the given directory
@@ -118,9 +118,11 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 
 		// skip test files unless includeTests is true
 		baseName := filepath.Base(path)
-		if !includeTests && (strings.HasSuffix(baseName, "_test.go") || strings.HasSuffix(baseName, "_test.ts") ||
-			strings.HasSuffix(baseName, "_test.js") || strings.HasSuffix(baseName, ".test.ts") ||
-			strings.HasSuffix(baseName, ".test.js")) {
+		if !includeTests && (strings.HasSuffix(baseName, "_test.go") ||
+			strings.HasSuffix(baseName, "_test.ts") || strings.HasSuffix(baseName, "_test.js") ||
+			strings.HasSuffix(baseName, ".test.ts") || strings.HasSuffix(baseName, ".test.js") ||
+			strings.HasSuffix(baseName, "_test.py") || strings.HasSuffix(baseName, "Test.java") ||
+			strings.Contains(baseName, "test_")) {
 			result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
 				Path:   relPath,
 				Reason: "test file",
@@ -142,6 +144,12 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 			fileType = "javascript"
 		} else if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx") {
 			fileType = "typescript"
+		} else if strings.HasSuffix(path, ".py") {
+			fileType = "python"
+		} else if strings.HasSuffix(path, ".java") {
+			fileType = "java"
+		} else if strings.HasSuffix(path, ".c") || strings.HasSuffix(path, ".h") {
+			fileType = "c"
 		}
 
 		// handle large files
@@ -160,13 +168,6 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 				})
 				return nil
 			}
-		}
-		if strings.HasSuffix(path, ".go") {
-			fileType = "go"
-		} else if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".jsx") {
-			fileType = "javascript"
-		} else if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx") {
-			fileType = "typescript"
 		}
 
 		doc := Document{
