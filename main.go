@@ -621,8 +621,13 @@ func indexSingleSource(llm LLMClient, srcPath, outPath string, loader func(strin
 		return fmt.Errorf("failed to create output directory: %w", err)
 	}
 
-	// checkpoint file (same name but with .checkpoint before .json)
-	checkpointFile := strings.Replace(outputFile, ".json", ".checkpoint.json", 1)
+	// checkpoint file (same name but with .checkpoint before extension)
+	var checkpointFile string
+	if strings.HasSuffix(outputFile, ".lrindex") {
+		checkpointFile = strings.Replace(outputFile, ".lrindex", ".checkpoint.lrindex", 1)
+	} else {
+		checkpointFile = strings.Replace(outputFile, ".json", ".checkpoint.json", 1)
+	}
 
 	// try to load checkpoint if it exists
 	vs := NewVectorStore()

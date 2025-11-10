@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -105,6 +106,11 @@ func (vs *VectorStore) Save(filepath string) error {
 		// must close gzip writer to flush all data before file closes
 		if err := gw.Close(); err != nil {
 			return err
+		}
+
+		// sync file to disk before returning
+		if err := f.Sync(); err != nil {
+			return fmt.Errorf("failed to sync file to disk: %w", err)
 		}
 
 		return nil
