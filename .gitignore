@@ -1,0 +1,31 @@
+# environment and secrets
+.env
+.env.*
+*.key
+*.pem
+*_key
+*_secret
+
+# chat logs
+chats/
+*.chat
+
+# indexed repositories
+nats.docs/
+nats.go/
+nats.js/
+nsc/
+natscli/
+jwt-auth-builder.go/
+nst.go/
+jsperftool/
+
+# vector stores and databases
+vector_db/
+vectorstore/
+*.db
+
+# binaries and scripts
+nats-llm
+test_mcp.sh
+test_query.sh
