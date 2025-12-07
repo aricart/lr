@@ -22,7 +22,7 @@ humans or tools with factual and almost hallucination-free constructs.
 ## features
 
 - index local directories or git repositories
-- intelligent code-aware chunking for go, javascript, typescript, python, java, and c
+- intelligent code-aware chunking for go, javascript, typescript, templ, python, java, and c
 - markdown documentation support
 - multiple embedding providers:
   - openai (text-embedding-3-small)
@@ -130,7 +130,7 @@ lr index --src /path/to/repo --code --out-name myproject
 **flags:**
 
 - `--src` (required): source directory to index
-- `--code`: index code files (.go, .js, .ts, .jsx, .tsx)
+- `--code`: index code files (.go, .js, .ts, .jsx, .tsx, .templ)
 - `--docs`: index markdown documentation (.md)
 - `--out`: exact output path (e.g., `vectorstore/custom.json`)
 - `--out-name`: output name with auto-timestamp (e.g., `myproject` →
@@ -281,12 +281,28 @@ lr mcp
 **flags:**
 
 - `--no-preload`: disable vector store preloading (allows on-the-fly updates)
+- `--reload <pid>`: send reload signal to mcp server with given pid
+- `--reload-all`: send reload signal to all running lr mcp processes
 
 **default behavior (preloading enabled):**
 
 - loads all vector stores into memory at startup
 - provides 10-100x faster query responses
-- restart server to pick up newly indexed repositories
+- use `--reload-all` or `--reload <pid>` to pick up newly indexed repositories
+
+**reloading indexes:**
+
+when you add new indexes, you can reload running mcp servers without restarting:
+
+```bash
+# reload all running lr mcp processes
+lr mcp --reload-all
+
+# reload a specific mcp server by pid
+lr mcp --reload 12345
+```
+
+the mcp server prints its pid at startup for easy reference.
 
 **with `--no-preload`:**
 
@@ -588,7 +604,7 @@ lr query "examples of error handling patterns"
 
 ## supported file types
 
-- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.java`, `.c`, `.h`
+- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.templ`, `.py`, `.java`, `.c`, `.h`
 - **documentation**: `.md`
 
 ## example workflow

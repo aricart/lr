@@ -70,6 +70,7 @@ var (
 	// mcp command flags
 	noPreload bool
 	reloadPid int
+	reloadAll bool
 )
 
 var rootCmd = &cobra.Command{
@@ -159,6 +160,7 @@ func init() {
 	// mcp command flags
 	mcpCmd.Flags().BoolVar(&noPreload, "no-preload", false, "disable vector store preloading (allows on-the-fly updates)")
 	mcpCmd.Flags().IntVar(&reloadPid, "reload", 0, "send reload signal to mcp server with given pid")
+	mcpCmd.Flags().BoolVar(&reloadAll, "reload-all", false, "send reload signal to all lr mcp processes")
 
 	// add commands
 	rootCmd.AddCommand(indexCmd)
@@ -270,13 +272,13 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	var extensions []string
 	var docType string
 	if useCode && useDocs {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".md"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".md"}
 		docType = "mixed"
 	} else if useDocs {
 		extensions = []string{".md"}
 		docType = "markdown"
 	} else {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
 		docType = "code"
 	}
 

@@ -5,7 +5,7 @@
 *.pem
 *_key
 *_secret
-
+.idea/
 # chat logs
 chats/
 *.chat

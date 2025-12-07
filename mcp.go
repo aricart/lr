@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 
@@ -207,6 +211,64 @@ func reloadVectorStores() error {
 	return nil
 }
 
+// reloadAllProcesses finds all lr processes and sends SIGUSR1 to them
+func reloadAllProcesses() error {
+	myPid := os.Getpid()
+
+	// use pgrep to find lr processes
+	cmd := exec.Command("pgrep", "-f", "lr mcp")
+	output, err := cmd.Output()
+	if err != nil {
+		// pgrep returns exit code 1 if no processes found
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			fmt.Println("no lr mcp processes found")
+			return nil
+		}
+		return fmt.Errorf("failed to find lr processes: %w", err)
+	}
+
+	var signaled int
+	scanner := bufio.NewScanner(strings.NewReader(string(output)))
+	for scanner.Scan() {
+		pidStr := strings.TrimSpace(scanner.Text())
+		if pidStr == "" {
+			continue
+		}
+
+		pid, err := strconv.Atoi(pidStr)
+		if err != nil {
+			continue
+		}
+
+		// skip our own process
+		if pid == myPid {
+			continue
+		}
+
+		process, err := os.FindProcess(pid)
+		if err != nil {
+			fmt.Printf("warning: could not find process %d: %v\n", pid, err)
+			continue
+		}
+
+		if err := process.Signal(syscall.SIGUSR1); err != nil {
+			fmt.Printf("warning: could not signal process %d: %v\n", pid, err)
+			continue
+		}
+
+		fmt.Printf("sent reload signal to pid %d\n", pid)
+		signaled++
+	}
+
+	if signaled == 0 {
+		fmt.Println("no lr mcp processes found to reload")
+	} else {
+		fmt.Printf("reloaded %d process(es)\n", signaled)
+	}
+
+	return nil
+}
+
 func serveMCP() error {
 	// handle --reload flag
 	if reloadPid > 0 {
@@ -222,6 +284,11 @@ func serveMCP() error {
 
 		fmt.Printf("sent reload signal to pid %d\n", reloadPid)
 		return nil
+	}
+
+	// handle --reload-all flag
+	if reloadAll {
+		return reloadAllProcesses()
 	}
 
 	// suppress info logs to stderr (MCP uses stdout for protocol)

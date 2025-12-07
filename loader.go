@@ -67,11 +67,9 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 		// get relative path for gitignore checking
 		relPath, _ := filepath.Rel(rootDir, path)
 
-		// check gitignore
-		if gitignore != nil && gitignore.MatchesPath(relPath) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
+		// check gitignore for files only - don't skip directories based on gitignore
+		// because allowlist patterns (like "* then !*.go") need to check actual files
+		if gitignore != nil && !d.IsDir() && gitignore.MatchesPath(relPath) {
 			return nil
 		}
 
@@ -144,6 +142,8 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 			fileType = "javascript"
 		} else if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx") {
 			fileType = "typescript"
+		} else if strings.HasSuffix(path, ".templ") {
+			fileType = "templ"
 		} else if strings.HasSuffix(path, ".py") {
 			fileType = "python"
 		} else if strings.HasSuffix(path, ".java") {
