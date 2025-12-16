@@ -10,6 +10,7 @@ type LLMClient interface {
 var _ LLMClient = (*OpenAIClient)(nil)
 var _ LLMClient = (*HybridClient)(nil)
 var _ LLMClient = (*VoyageClaudeClient)(nil)
+var _ LLMClient = (*OllamaClaudeClient)(nil)
 
 // HybridClient uses OpenAI for embeddings and Claude for chat
 type HybridClient struct {

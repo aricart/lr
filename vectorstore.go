@@ -20,13 +20,15 @@ type VectorStore struct {
 
 // VectorStoreMetadata tracks information about the indexed source
 type VectorStoreMetadata struct {
-	IndexedAt    string        `json:"indexed_at"`
-	SourcePath   string        `json:"source_path"`
-	FileCount    int           `json:"file_count"`
-	ChunkCount   int           `json:"chunk_count"`
-	IndexedFiles []string      `json:"indexed_files"` // list of all indexed file paths
-	SkippedFiles []SkippedFile `json:"skipped_files"` // files that were skipped with reasons
-	LastCommit   string        `json:"last_commit"`   // git commit hash for incremental updates
+	IndexedAt      string        `json:"indexed_at"`
+	SourcePath     string        `json:"source_path"`
+	FileCount      int           `json:"file_count"`
+	ChunkCount     int           `json:"chunk_count"`
+	IndexedFiles   []string      `json:"indexed_files"`   // list of all indexed file paths
+	SkippedFiles   []SkippedFile `json:"skipped_files"`   // files that were skipped with reasons
+	LastCommit     string        `json:"last_commit"`     // git commit hash for incremental updates
+	ReviewIndex    bool          `json:"review_index"`    // true if this is a temporary review session index
+	EmbeddingModel string        `json:"embedding_model"` // model used for embeddings (e.g., nomic-embed-text)
 }
 
 // SkippedFile represents a file that was skipped during indexing

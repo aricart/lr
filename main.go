@@ -61,6 +61,7 @@ var embeddingModelAliases = map[string]string{
 	"openai":  "text-embedding-3-small",
 	"voyage":  "voyage-code-2",
 	"voyage3": "voyage-3",
+	"ollama":  "nomic-embed-text",
 }
 
 // default chat model
@@ -151,6 +152,42 @@ var updateAllCmd = &cobra.Command{
 	RunE:  runUpdateAll,
 }
 
+var reviewCmd = &cobra.Command{
+	Use:   "review",
+	Short: "Code review context using local ollama embeddings",
+	Long:  `Start/stop a review session that indexes your project locally for code review context.`,
+}
+
+var reviewStartCmd = &cobra.Command{
+	Use:   "start",
+	Short: "Start a review session (indexes current directory with ollama)",
+	Long: `Start a review session. This will:
+1. Start ollama if not running
+2. Pull the embedding model if needed
+3. Index the current directory
+4. Enable watch mode for live updates`,
+	RunE: runReviewStart,
+}
+
+var reviewStopCmd = &cobra.Command{
+	Use:   "stop",
+	Short: "Stop the review session and delete the index",
+	RunE:  runReviewStop,
+}
+
+var reviewStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "Show current review session status",
+	RunE:  runReviewStatus,
+}
+
+var reviewWatchCmd = &cobra.Command{
+	Use:   "watch",
+	Short: "Watch for file changes and update the index in real-time",
+	Long:  `Start watching for file changes. When a file is saved, it will be re-indexed automatically.`,
+	RunE:  runReviewWatch,
+}
+
 func init() {
 	// load .env file if it exists (check current dir, then config dir)
 	envPath := getEnvFilePath()
@@ -188,7 +225,7 @@ func init() {
 
 	// model configuration flags (persistent, available to all commands)
 	rootCmd.PersistentFlags().StringVar(&chatModel, "model", "", "chat model to use (aliases: sonnet, haiku, opus, gpt-4o, gpt-4o-mini)")
-	rootCmd.PersistentFlags().StringVar(&embeddingModel, "embedding-model", "", "embedding model (aliases: openai, voyage, voyage3)")
+	rootCmd.PersistentFlags().StringVar(&embeddingModel, "embedding-model", "", "embedding model (aliases: openai, voyage, voyage3, ollama)")
 
 	// update-all command flags
 	updateAllCmd.Flags().BoolVar(&useGit, "git", false, "use git to detect changes (default: file mtime)")
@@ -202,6 +239,13 @@ func init() {
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(pathsCmd)
 	rootCmd.AddCommand(updateAllCmd)
+
+	// review command with subcommands
+	reviewCmd.AddCommand(reviewStartCmd)
+	reviewCmd.AddCommand(reviewStopCmd)
+	reviewCmd.AddCommand(reviewStatusCmd)
+	reviewCmd.AddCommand(reviewWatchCmd)
+	rootCmd.AddCommand(reviewCmd)
 }
 
 func main() {
@@ -219,6 +263,16 @@ func getLLMClient() (LLMClient, error) {
 	// resolve model aliases
 	resolvedChatModel := resolveChatModel(chatModel)
 	resolvedEmbeddingModel := resolveEmbeddingModel(embeddingModel)
+
+	// ollama: local embeddings (no api key needed, just needs ollama running)
+	if embeddingModel == "ollama" || resolvedEmbeddingModel == "nomic-embed-text" {
+		embModel := resolvedEmbeddingModel
+		if embModel == "" {
+			embModel = "nomic-embed-text"
+		}
+		fmt.Printf("using ollama embeddings (%s) + claude chat (%s)\n", embModel, resolvedChatModel)
+		return NewOllamaClaudeClient(embModel, resolvedChatModel)
+	}
 
 	// priority order for embedding+chat combinations
 	if voyageKey != "" && claudeKey != "" {
@@ -252,7 +306,8 @@ func getLLMClient() (LLMClient, error) {
 	return nil, fmt.Errorf("no api key found. please set one of:\n" +
 		"  - OPENAI_API_KEY (for openai only)\n" +
 		"  - OPENAI_API_KEY + ANTHROPIC_API_KEY (hybrid mode)\n" +
-		"  - VOYAGE_API_KEY + ANTHROPIC_API_KEY (recommended for code!)")
+		"  - VOYAGE_API_KEY + ANTHROPIC_API_KEY (recommended for code!)\n" +
+		"  - --embedding-model=ollama (local embeddings, no api key needed)")
 }
 
 func estimateCost(numChunks int) {

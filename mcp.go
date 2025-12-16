@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -69,6 +70,14 @@ func createMCPServer() *server.MCPServer {
 			mcp.Description("The file path to search for (can be partial, e.g., 'server.go' or 'cmd/main.go')")),
 	)
 	s.AddTool(fileTool, handleSearchByFile)
+
+	// add get_diff_context tool for code review
+	diffTool := mcp.NewTool("get_diff_context",
+		mcp.WithDescription("Get git diff with relevant indexed context for code review. Requires an active review session (lr review start). Returns the uncommitted changes plus relevant code context from the review index."),
+		mcp.WithNumber("top_k",
+			mcp.Description("Number of relevant context chunks per changed file (default: 3)")),
+	)
+	s.AddTool(diffTool, handleGetDiffContext)
 
 	return s
 }
@@ -421,6 +430,107 @@ func handleSearchByFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.
 	}
 
 	return mcp.NewToolResultText(response), nil
+}
+
+func handleGetDiffContext(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// get arguments
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	topK := 3
+	if ok {
+		if tk, ok := args["top_k"].(float64); ok {
+			topK = int(tk)
+		}
+	}
+
+	// load review session
+	session, err := loadReviewSession()
+	if err != nil {
+		return mcp.NewToolResultError("no active review session. run 'lr review start' first"), nil
+	}
+
+	// get git diff from project directory (--no-ext-diff ensures unified format regardless of user config)
+	cmd := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--no-ext-diff")
+	diffOutput, err := cmd.Output()
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to get git diff: %v", err)), nil
+	}
+
+	// also get staged changes
+	cmdStaged := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--cached", "--no-ext-diff")
+	stagedOutput, _ := cmdStaged.Output()
+
+	// combine diff output
+	fullDiff := string(diffOutput)
+	if len(stagedOutput) > 0 {
+		fullDiff += "\n=== STAGED CHANGES ===\n" + string(stagedOutput)
+	}
+
+	if fullDiff == "" {
+		return mcp.NewToolResultText("no uncommitted changes found"), nil
+	}
+
+	// extract changed file paths from diff
+	changedFiles := extractChangedFiles(fullDiff)
+	if len(changedFiles) == 0 {
+		return mcp.NewToolResultText("git diff:\n\n" + fullDiff), nil
+	}
+
+	// load review index
+	store := NewVectorStore()
+	if err := store.Load(session.IndexPath); err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("failed to load review index: %v", err)), nil
+	}
+
+	// build response with diff and context
+	response := "=== GIT DIFF ===\n\n" + fullDiff + "\n\n"
+	response += "=== RELEVANT CONTEXT ===\n\n"
+
+	// for each changed file, find related context
+	for _, file := range changedFiles {
+		// search for this file in the index
+		fileChunks := []Chunk{}
+		for _, chunk := range store.Chunks {
+			if strings.Contains(chunk.Source, file) {
+				fileChunks = append(fileChunks, chunk)
+			}
+		}
+
+		if len(fileChunks) > 0 {
+			response += fmt.Sprintf("--- context from %s ---\n", file)
+			for i, chunk := range fileChunks {
+				if i >= topK {
+					break
+				}
+				response += chunk.Text + "\n\n"
+			}
+		}
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+// extractChangedFiles parses a git diff and returns the list of changed file paths
+func extractChangedFiles(diff string) []string {
+	files := make(map[string]bool)
+	lines := strings.Split(diff, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+++ b/") {
+			file := strings.TrimPrefix(line, "+++ b/")
+			files[file] = true
+		} else if strings.HasPrefix(line, "--- a/") {
+			file := strings.TrimPrefix(line, "--- a/")
+			if file != "/dev/null" {
+				files[file] = true
+			}
+		}
+	}
+
+	result := make([]string, 0, len(files))
+	for f := range files {
+		result = append(result, f)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func reloadVectorStores() error {

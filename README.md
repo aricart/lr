@@ -28,6 +28,7 @@ humans or tools with factual and almost hallucination-free constructs.
 - multiple embedding providers:
   - openai (text-embedding-3-small)
   - voyage ai (code-optimized embeddings)
+  - ollama (local embeddings, no api key needed)
 - multiple llm providers:
   - openai (gpt-4o-mini)
   - anthropic claude (sonnet 4)
@@ -39,6 +40,7 @@ humans or tools with factual and almost hallucination-free constructs.
 - checkpoint/resume support for long indexing jobs
 - incremental updates (only re-index changed files via git or mtime detection)
 - bulk update all indexes with automatic backup
+- code review mode with local ollama embeddings and file watching
 
 ## architecture
 
@@ -114,6 +116,10 @@ ANTHROPIC_API_KEY=your-key
 # option c: voyage + claude (best for code)
 VOYAGE_API_KEY=your-key
 ANTHROPIC_API_KEY=your-key
+
+# option d: ollama (local embeddings, no api key for embeddings)
+# just need ANTHROPIC_API_KEY for chat synthesis
+ANTHROPIC_API_KEY=your-key
 ```
 
 ## global flags
@@ -121,7 +127,7 @@ ANTHROPIC_API_KEY=your-key
 these flags work with any command:
 
 - `--embedding-model`: embedding provider (aliases: `openai`, `voyage`,
-  `voyage3`)
+  `voyage3`, `ollama`)
 - `--model`: chat model (aliases: `sonnet`, `haiku`, `opus`, `gpt-4o`,
   `gpt-4o-mini`)
 
@@ -339,14 +345,15 @@ the mcp server prints its pid at startup for easy reference.
 
 **mcp tools:**
 
-the mcp server exposes four tools for ai agents:
+the mcp server exposes five tools for ai agents:
 
-| tool                 | description                              |
-| -------------------- | ---------------------------------------- |
-| `query_repositories` | semantic search across all indexed repos |
-| `list_indexes`       | list all available indexes with metadata |
-| `get_index_stats`    | detailed statistics for a specific index |
-| `search_by_file`     | get all chunks from a specific file path |
+| tool                 | description                                          |
+| -------------------- | ---------------------------------------------------- |
+| `query_repositories` | semantic search across all indexed repos             |
+| `list_indexes`       | list all available indexes with metadata             |
+| `get_index_stats`    | detailed statistics for a specific index             |
+| `search_by_file`     | get all chunks from a specific file path             |
+| `get_diff_context`   | git diff with indexed context for code review        |
 
 **query_repositories parameters:**
 
@@ -366,6 +373,12 @@ the mcp server exposes four tools for ai agents:
 **search_by_file parameters:**
 
 - `path` (required): file path to search for (can be partial, e.g., 'server.go')
+
+**get_diff_context parameters:**
+
+- `top_k` (optional): number of context chunks per changed file (default: 3)
+
+requires an active review session started with `lr review start`.
 
 **ai agent integration:**
 
@@ -465,6 +478,65 @@ you can override them with environment variables:
   XDG_DATA_HOME   - base directory for data files
   XDG_CONFIG_HOME - base directory for config files
 ```
+
+### `lr review` - code review with local embeddings
+
+start a review session that indexes your project locally using ollama for
+embeddings. provides context-aware code review through the mcp `get_diff_context`
+tool.
+
+**subcommands:**
+
+- `lr review start`: start a review session (indexes current directory, starts
+  file watching)
+- `lr review stop`: stop the session and delete the temporary index
+- `lr review status`: show current session status
+- `lr review watch`: restart file watching for an existing session
+
+**usage:**
+
+```bash
+# start a review session in your project directory
+cd /path/to/your/project
+lr review start
+```
+
+**what it does:**
+
+1. starts ollama if not running
+2. pulls the embedding model (nomic-embed-text) if needed
+3. indexes all code and docs in the current directory
+4. watches for file changes and updates the index in real-time
+5. enables the `get_diff_context` mcp tool for ai agents
+
+**requirements:**
+
+- [ollama](https://ollama.ai) installed locally
+- `ANTHROPIC_API_KEY` set (for chat synthesis, not needed for embeddings)
+
+**example workflow with claude code:**
+
+```bash
+# terminal 1: start review session
+cd ~/myproject
+lr review start
+
+# in claude code, ask for a code review
+# claude will use get_diff_context to see your changes with relevant context
+```
+
+**stopping the session:**
+
+```bash
+# stop and clean up (also triggered by Ctrl+C in the terminal running start)
+lr review stop
+```
+
+**notes:**
+
+- the review index is temporary and stored separately from regular indexes
+- file watching automatically re-indexes changed files within 500ms
+- stale sessions (from crashes) are automatically cleaned up on next start
 
 ### `lr update-all` - bulk update all indexes
 
@@ -675,6 +747,8 @@ lr query "examples of error handling patterns"
 ├── openai.go            # openai embeddings + chat
 ├── anthropic.go         # claude chat client
 ├── voyage.go            # voyage ai embeddings
+├── ollama.go            # ollama local embeddings
+├── review.go            # code review session management
 └── env.go               # .env file loader
 ```
 
@@ -697,7 +771,8 @@ lr query "examples of error handling patterns"
 - **multisource.go**: aggregates searches across multiple indexes
 - **rag.go**: combines retrieval + llm synthesis with context building
 - **llm.go**: interface for embeddings and chat (provider-agnostic)
-- **{openai,anthropic,voyage}.go**: provider-specific api implementations
+- **{openai,anthropic,voyage,ollama}.go**: provider-specific api implementations
+- **review.go**: code review session with ollama embeddings and file watching
 
 ## supported file types
 
