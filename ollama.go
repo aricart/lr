@@ -89,21 +89,18 @@ func (o *OllamaClient) Chat(_ []Message) (string, error) {
 
 // OllamaClaudeClient uses Ollama for embeddings and Claude for chat
 type OllamaClaudeClient struct {
-	Ollama *OllamaClient
-	Claude *AnthropicClient
+	Ollama    *OllamaClient
+	Claude    *AnthropicClient
+	chatModel string
 }
 
 // NewOllamaClaudeClient creates a client using Ollama embeddings + Claude chat
-// Returns an error if ANTHROPIC_API_KEY is not set
-func NewOllamaClaudeClient(embeddingModel, chatModel string) (*OllamaClaudeClient, error) {
-	claudeKey := os.Getenv("ANTHROPIC_API_KEY")
-	if claudeKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY is required for ollama+claude mode")
-	}
+// Claude client is created lazily when Chat is called (allows indexing without API key)
+func NewOllamaClaudeClient(embeddingModel, chatModel string) *OllamaClaudeClient {
 	return &OllamaClaudeClient{
-		Ollama: NewOllamaClient(embeddingModel),
-		Claude: NewAnthropicClient(claudeKey, chatModel),
-	}, nil
+		Ollama:    NewOllamaClient(embeddingModel),
+		chatModel: chatModel,
+	}
 }
 
 // GetEmbedding uses Ollama for embeddings
@@ -111,7 +108,14 @@ func (oc *OllamaClaudeClient) GetEmbedding(text string) ([]float64, error) {
 	return oc.Ollama.GetEmbedding(text)
 }
 
-// Chat uses Claude for chat
+// Chat uses Claude for chat (lazily initializes Claude client)
 func (oc *OllamaClaudeClient) Chat(messages []Message) (string, error) {
+	if oc.Claude == nil {
+		claudeKey := os.Getenv("ANTHROPIC_API_KEY")
+		if claudeKey == "" {
+			return "", fmt.Errorf("ANTHROPIC_API_KEY is required for chat synthesis")
+		}
+		oc.Claude = NewAnthropicClient(claudeKey, oc.chatModel)
+	}
 	return oc.Claude.Chat(messages)
 }

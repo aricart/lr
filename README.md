@@ -365,6 +365,8 @@ the mcp server exposes five tools for ai agents:
     better answers)
   - `false`: returns raw chunks only (faster, cheaper, lets the calling agent
     synthesize)
+- `sources` (optional): comma-separated list of source names to search (e.g.,
+  'jwt,nats-server'). if not specified, searches all sources
 
 **get_index_stats parameters:**
 

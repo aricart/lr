@@ -35,7 +35,7 @@ func createMCPServer() *server.MCPServer {
 
 	// add query tool
 	queryTool := mcp.NewTool("query_repositories",
-		mcp.WithDescription("Query indexed code repositories and documentation. Returns relevant information from all indexed sources."),
+		mcp.WithDescription("Query indexed code repositories and documentation. Returns relevant information from indexed sources."),
 		mcp.WithString("query",
 			mcp.Required(),
 			mcp.Description("The question to ask about the indexed repositories")),
@@ -43,6 +43,8 @@ func createMCPServer() *server.MCPServer {
 			mcp.Description("Number of relevant chunks to retrieve (default: 3)")),
 		mcp.WithBoolean("synthesize",
 			mcp.Description("Use LLM to synthesize an answer from the chunks (default: true). Set to false to return raw chunks only.")),
+		mcp.WithString("sources",
+			mcp.Description("Comma-separated list of source names to search (e.g., 'jwt,nats-server'). If not specified, searches all sources.")),
 	)
 
 	s.AddTool(queryTool, handleQuery)
@@ -115,6 +117,17 @@ func handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		}
 	}
 
+	// get sources parameter (optional)
+	var sources []string
+	if sourcesArg, ok := args["sources"].(string); ok && sourcesArg != "" {
+		for _, s := range strings.Split(sourcesArg, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				sources = append(sources, s)
+			}
+		}
+	}
+
 	// load vector store (always needed)
 	var mss *MultiSourceStore
 	var err error
@@ -167,10 +180,15 @@ func handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 		}
 
 		// search for relevant chunks
-		results := mss.Search(queryEmbedding, topK, []string{})
+		results := mss.Search(queryEmbedding, topK, sources)
 
 		// format raw results
-		response := fmt.Sprintf("loaded %d sources: %v\n\n", len(mss.Sources), mss.ListSources())
+		var response string
+		if len(sources) > 0 {
+			response = fmt.Sprintf("searching %d of %d sources: %v\n\n", len(sources), len(mss.Sources), sources)
+		} else {
+			response = fmt.Sprintf("searching all %d sources: %v\n\n", len(mss.Sources), mss.ListSources())
+		}
 		response += fmt.Sprintf("================================================================================\n")
 		response += fmt.Sprintf("query: %s\n", query)
 		response += fmt.Sprintf("================================================================================\n\n")
@@ -207,13 +225,18 @@ func handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 
 	// create rag and query
 	rag := NewRAGMultiSource(mss, llm)
-	answer, results, err := rag.Query(query, topK)
+	answer, results, err := rag.QueryWithSources(query, topK, sources)
 	if err != nil {
 		return mcp.NewToolResultError(fmt.Sprintf("query failed: %v", err)), nil
 	}
 
 	// format response
-	response := fmt.Sprintf("loaded %d sources: %v\n\n", len(mss.Sources), mss.ListSources())
+	var response string
+	if len(sources) > 0 {
+		response = fmt.Sprintf("searching %d of %d sources: %v\n\n", len(sources), len(mss.Sources), sources)
+	} else {
+		response = fmt.Sprintf("searching all %d sources: %v\n\n", len(mss.Sources), mss.ListSources())
+	}
 	response += fmt.Sprintf("================================================================================\n")
 	response += fmt.Sprintf("question: %s\n", query)
 	response += fmt.Sprintf("================================================================================\n\n")

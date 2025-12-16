@@ -271,7 +271,7 @@ func getLLMClient() (LLMClient, error) {
 			embModel = "nomic-embed-text"
 		}
 		fmt.Printf("using ollama embeddings (%s) + claude chat (%s)\n", embModel, resolvedChatModel)
-		return NewOllamaClaudeClient(embModel, resolvedChatModel)
+		return NewOllamaClaudeClient(embModel, resolvedChatModel), nil
 	}
 
 	// priority order for embedding+chat combinations
