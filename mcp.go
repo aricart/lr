@@ -75,9 +75,11 @@ func createMCPServer() *server.MCPServer {
 
 	// add get_diff_context tool for code review
 	diffTool := mcp.NewTool("get_diff_context",
-		mcp.WithDescription("Get git diff with relevant indexed context for code review. Requires an active review session (lr review start). Returns the uncommitted changes plus relevant code context from the review index."),
+		mcp.WithDescription("Get git diff with relevant indexed context for code review. Requires an active review session (lr review start). By default returns all changes on current branch vs main/master, plus relevant code context from the review index."),
 		mcp.WithNumber("top_k",
 			mcp.Description("Number of relevant context chunks per changed file (default: 3)")),
+		mcp.WithBoolean("uncommitted_only",
+			mcp.Description("Only show uncommitted and staged changes instead of full branch diff (default: false)")),
 	)
 	s.AddTool(diffTool, handleGetDiffContext)
 
@@ -459,9 +461,13 @@ func handleGetDiffContext(ctx context.Context, request mcp.CallToolRequest) (*mc
 	// get arguments
 	args, ok := request.Params.Arguments.(map[string]interface{})
 	topK := 3
+	uncommittedOnly := false
 	if ok {
 		if tk, ok := args["top_k"].(float64); ok {
 			topK = int(tk)
+		}
+		if uo, ok := args["uncommitted_only"].(bool); ok {
+			uncommittedOnly = uo
 		}
 	}
 
@@ -471,25 +477,44 @@ func handleGetDiffContext(ctx context.Context, request mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultError("no active review session. run 'lr review start' first"), nil
 	}
 
-	// get git diff from project directory (--no-ext-diff ensures unified format regardless of user config)
-	cmd := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--no-ext-diff")
-	diffOutput, err := cmd.Output()
-	if err != nil {
-		return mcp.NewToolResultError(fmt.Sprintf("failed to get git diff: %v", err)), nil
-	}
+	var fullDiff string
 
-	// also get staged changes
-	cmdStaged := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--cached", "--no-ext-diff")
-	stagedOutput, _ := cmdStaged.Output()
+	if uncommittedOnly {
+		// get only uncommitted/staged changes
+		cmd := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--no-ext-diff")
+		diffOutput, err := cmd.Output()
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get git diff: %v", err)), nil
+		}
 
-	// combine diff output
-	fullDiff := string(diffOutput)
-	if len(stagedOutput) > 0 {
-		fullDiff += "\n=== STAGED CHANGES ===\n" + string(stagedOutput)
-	}
+		// also get staged changes
+		cmdStaged := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--cached", "--no-ext-diff")
+		stagedOutput, _ := cmdStaged.Output()
 
-	if fullDiff == "" {
-		return mcp.NewToolResultText("no uncommitted changes found"), nil
+		fullDiff = string(diffOutput)
+		if len(stagedOutput) > 0 {
+			fullDiff += "\n=== STAGED CHANGES ===\n" + string(stagedOutput)
+		}
+
+		if fullDiff == "" {
+			return mcp.NewToolResultText("no uncommitted changes found"), nil
+		}
+	} else {
+		// default: get diff of current branch vs main/master
+		baseBranch := detectBaseBranch(ctx, session.ProjectPath)
+		diffSpec := baseBranch + "...HEAD"
+		cmd := exec.CommandContext(ctx, "git", "-C", session.ProjectPath, "diff", "--no-ext-diff", diffSpec)
+		diffOutput, err := cmd.Output()
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to get branch diff (%s): %v", diffSpec, err)), nil
+		}
+		fullDiff = string(diffOutput)
+
+		if fullDiff == "" {
+			return mcp.NewToolResultText(fmt.Sprintf("no changes on current branch vs %s", baseBranch)), nil
+		}
+
+		fullDiff = fmt.Sprintf("=== BRANCH DIFF (%s) ===\n\n%s", diffSpec, fullDiff)
 	}
 
 	// extract changed file paths from diff
@@ -530,6 +555,24 @@ func handleGetDiffContext(ctx context.Context, request mcp.CallToolRequest) (*mc
 	}
 
 	return mcp.NewToolResultText(response), nil
+}
+
+// detectBaseBranch detects whether the repo uses main or master as the base branch
+func detectBaseBranch(ctx context.Context, projectPath string) string {
+	// check if 'main' branch exists
+	cmd := exec.CommandContext(ctx, "git", "-C", projectPath, "rev-parse", "--verify", "main")
+	if err := cmd.Run(); err == nil {
+		return "main"
+	}
+
+	// check if 'master' branch exists
+	cmd = exec.CommandContext(ctx, "git", "-C", projectPath, "rev-parse", "--verify", "master")
+	if err := cmd.Run(); err == nil {
+		return "master"
+	}
+
+	// default to main
+	return "main"
 }
 
 // extractChangedFiles parses a git diff and returns the list of changed file paths

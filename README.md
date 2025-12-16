@@ -414,8 +414,11 @@ the mcp server exposes five tools for ai agents:
 **get_diff_context parameters:**
 
 - `top_k` (optional): number of context chunks per changed file (default: 3)
+- `uncommitted_only` (optional): only show uncommitted/staged changes instead of
+  full branch diff (default: false)
 
-requires an active review session started with `lr review start`.
+by default, shows all changes on current branch vs main/master. requires an
+active review session started with `lr review start`.
 
 **ai agent integration:**
 
