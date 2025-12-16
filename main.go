@@ -89,6 +89,40 @@ func resolveEmbeddingModel(model string) string {
 	return model // assume it's a full model ID
 }
 
+// getCurrentEmbeddingModel returns the embedding model that would be used for queries
+// based on the --embedding-model flag and environment variables
+func getCurrentEmbeddingModel() string {
+	resolved := resolveEmbeddingModel(embeddingModel)
+
+	// explicit ollama
+	if embeddingModel == "ollama" || resolved == "nomic-embed-text" {
+		if resolved == "" {
+			return "nomic-embed-text"
+		}
+		return resolved
+	}
+
+	// explicit model specified
+	if resolved != "" {
+		return resolved
+	}
+
+	// auto-detect based on available api keys
+	voyageKey := os.Getenv("VOYAGE_API_KEY")
+	openaiKey := os.Getenv("OPENAI_API_KEY")
+	claudeKey := os.Getenv("ANTHROPIC_API_KEY")
+
+	if voyageKey != "" && claudeKey != "" {
+		return "voyage-code-2"
+	}
+	if openaiKey != "" {
+		return "text-embedding-3-small"
+	}
+
+	// no keys available - would need ollama or fail
+	return ""
+}
+
 var rootCmd = &cobra.Command{
 	Use:   "lr",
 	Short: "LocalRag - local-first RAG system for code and documentation",
@@ -563,6 +597,9 @@ func runList(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	// get current embedding model for compatibility check
+	currentModel := getCurrentEmbeddingModel()
+
 	fmt.Printf("found %d vector store(s):\n\n", len(validFiles))
 
 	// load each vector store and display metadata
@@ -600,6 +637,34 @@ func runList(_ *cobra.Command, _ []string) error {
 		}
 		if vs.Metadata.IndexedAt != "" {
 			fmt.Printf("    indexed: %s\n", vs.Metadata.IndexedAt)
+		}
+
+		// show embedding model and compatibility
+		indexModel := vs.Metadata.EmbeddingModel
+		if indexModel == "" && len(vs.Embeddings) > 0 && len(vs.Embeddings[0]) > 0 {
+			// infer from embedding dimensions
+			dims := len(vs.Embeddings[0])
+			switch dims {
+			case 768:
+				indexModel = "nomic-embed-text"
+			case 1536:
+				indexModel = "text-embedding-3-small"
+			case 1024:
+				indexModel = "voyage-code-2"
+			default:
+				indexModel = fmt.Sprintf("unknown (%d dims)", dims)
+			}
+		}
+		if indexModel != "" {
+			compat := ""
+			if currentModel != "" {
+				if indexModel == currentModel {
+					compat = " ✓"
+				} else {
+					compat = " ✗"
+				}
+			}
+			fmt.Printf("    embedding: %s%s\n", indexModel, compat)
 		}
 		fmt.Println()
 	}
@@ -1044,6 +1109,7 @@ func indexSingleSource(llm LLMClient, srcPath, outPath string, loader func(strin
 	vs.Metadata.IndexedAt = time.Now().Format(time.RFC3339)
 	vs.Metadata.ChunkCount = len(vs.Chunks)
 	vs.Metadata.FileCount = len(docs)
+	vs.Metadata.EmbeddingModel = getCurrentEmbeddingModel()
 
 	// populate indexed files list
 	fileSet := make(map[string]bool)
@@ -1297,6 +1363,7 @@ func runIncrementalIndexWithLLM(llm LLMClient, finalOutPath string) error {
 	vs.Metadata.IndexedAt = time.Now().Format(time.RFC3339)
 	vs.Metadata.ChunkCount = len(vs.Chunks)
 	vs.Metadata.FileCount = len(vs.Metadata.IndexedFiles)
+	vs.Metadata.EmbeddingModel = getCurrentEmbeddingModel()
 	if useGit {
 		commit, _ := getGitHeadCommit(srcPath)
 		vs.Metadata.LastCommit = commit

@@ -141,6 +141,35 @@ lr query "how does auth work?" --embedding-model voyage --model opus
 lr index --src ./repo --out-name repo --embedding-model openai --model gpt-4o
 ```
 
+## private/sensitive data
+
+for sensitive documents that should never leave your machine, use ollama for
+fully local embeddings:
+
+```bash
+# index sensitive code with local embeddings
+lr index --src ./private-repo --out-name private --embedding-model=ollama
+
+# query locally - embeddings never leave your machine
+lr query --sources=private --embedding-model=ollama "find auth vulnerabilities"
+```
+
+**important**: indexes are model-specific by design. an index created with
+ollama can only be queried with ollama. this prevents accidentally exposing
+sensitive data to external apis - queries with mismatched models return no
+results.
+
+use `lr list` to see which embedding model each index uses:
+
+```
+lr list
+  • private_20251215.lrindex
+    embedding: nomic-embed-text ✓    # compatible with current --embedding-model
+
+  • public-repo_20251215.lrindex
+    embedding: text-embedding-3-small ✗  # incompatible (would need openai)
+```
+
 ## commands
 
 localrag provides several commands for different workflows:
