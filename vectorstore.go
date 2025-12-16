@@ -26,6 +26,7 @@ type VectorStoreMetadata struct {
 	ChunkCount   int           `json:"chunk_count"`
 	IndexedFiles []string      `json:"indexed_files"` // list of all indexed file paths
 	SkippedFiles []SkippedFile `json:"skipped_files"` // files that were skipped with reasons
+	LastCommit   string        `json:"last_commit"`   // git commit hash for incremental updates
 }
 
 // SkippedFile represents a file that was skipped during indexing

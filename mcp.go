@@ -46,6 +46,30 @@ func createMCPServer() *server.MCPServer {
 
 	s.AddTool(queryTool, handleQuery)
 
+	// add list_indexes tool
+	listTool := mcp.NewTool("list_indexes",
+		mcp.WithDescription("List all available indexed repositories with metadata. Use this to see what's indexed before querying."),
+	)
+	s.AddTool(listTool, handleListIndexes)
+
+	// add get_index_stats tool
+	statsTool := mcp.NewTool("get_index_stats",
+		mcp.WithDescription("Get detailed statistics about a specific index including file list."),
+		mcp.WithString("name",
+			mcp.Required(),
+			mcp.Description("The index name (e.g., 'nats-server', 'docs')")),
+	)
+	s.AddTool(statsTool, handleGetIndexStats)
+
+	// add search_by_file tool
+	fileTool := mcp.NewTool("search_by_file",
+		mcp.WithDescription("Get all indexed chunks from a specific file. Use this when user asks about a specific file rather than a concept."),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("The file path to search for (can be partial, e.g., 'server.go' or 'cmd/main.go')")),
+	)
+	s.AddTool(fileTool, handleSearchByFile)
+
 	return s
 }
 
@@ -188,6 +212,212 @@ func handleQuery(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToo
 	response += fmt.Sprintf("sources:\n")
 	for i, result := range results {
 		response += fmt.Sprintf("  [%d] %s (similarity: %.3f)\n", i+1, result.Chunk.Source, result.Similarity)
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+func handleListIndexes(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// use preloaded stores if available
+	var mss *MultiSourceStore
+
+	preloadMutex.RLock()
+	if preloadedMSS != nil {
+		mss = preloadedMSS
+	}
+	preloadMutex.RUnlock()
+
+	if mss == nil {
+		// load on-demand
+		indexDir := getDefaultIndexDir()
+		mss = NewMultiSourceStore(indexDir)
+		if err := mss.LoadAll(); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to load indexes: %v", err)), nil
+		}
+	}
+
+	if len(mss.Sources) == 0 {
+		return mcp.NewToolResultText("no indexes found. run 'lr index' to index repositories first."), nil
+	}
+
+	response := fmt.Sprintf("found %d indexed repositories:\n\n", len(mss.Sources))
+
+	for name, vs := range mss.Sources {
+		response += fmt.Sprintf("• %s\n", name)
+		response += fmt.Sprintf("  chunks: %d\n", len(vs.Chunks))
+		if vs.Metadata.FileCount > 0 {
+			response += fmt.Sprintf("  files: %d\n", vs.Metadata.FileCount)
+		}
+		if vs.Metadata.SourcePath != "" {
+			response += fmt.Sprintf("  source: %s\n", vs.Metadata.SourcePath)
+		}
+		if vs.Metadata.IndexedAt != "" {
+			response += fmt.Sprintf("  indexed: %s\n", vs.Metadata.IndexedAt)
+		}
+		response += "\n"
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+func handleGetIndexStats(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// get arguments
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		return mcp.NewToolResultError("invalid arguments"), nil
+	}
+
+	name, ok := args["name"].(string)
+	if !ok || name == "" {
+		return mcp.NewToolResultError("name parameter is required"), nil
+	}
+
+	// use preloaded stores if available
+	var mss *MultiSourceStore
+
+	preloadMutex.RLock()
+	if preloadedMSS != nil {
+		mss = preloadedMSS
+	}
+	preloadMutex.RUnlock()
+
+	if mss == nil {
+		// load on-demand
+		indexDir := getDefaultIndexDir()
+		mss = NewMultiSourceStore(indexDir)
+		if err := mss.LoadAll(); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to load indexes: %v", err)), nil
+		}
+	}
+
+	// find the index (try exact match first, then partial)
+	var vs *VectorStore
+	var foundName string
+	for n, store := range mss.Sources {
+		if n == name {
+			vs = store
+			foundName = n
+			break
+		}
+	}
+	if vs == nil {
+		// try partial match
+		for n, store := range mss.Sources {
+			if strings.Contains(strings.ToLower(n), strings.ToLower(name)) {
+				vs = store
+				foundName = n
+				break
+			}
+		}
+	}
+
+	if vs == nil {
+		available := make([]string, 0, len(mss.Sources))
+		for n := range mss.Sources {
+			available = append(available, n)
+		}
+		return mcp.NewToolResultError(fmt.Sprintf("index '%s' not found. available: %v", name, available)), nil
+	}
+
+	response := fmt.Sprintf("index: %s\n\n", foundName)
+	response += fmt.Sprintf("chunks: %d\n", len(vs.Chunks))
+	response += fmt.Sprintf("files: %d\n", vs.Metadata.FileCount)
+	if vs.Metadata.SourcePath != "" {
+		response += fmt.Sprintf("source path: %s\n", vs.Metadata.SourcePath)
+	}
+	if vs.Metadata.IndexedAt != "" {
+		response += fmt.Sprintf("indexed at: %s\n", vs.Metadata.IndexedAt)
+	}
+	if vs.Metadata.LastCommit != "" {
+		response += fmt.Sprintf("git commit: %s\n", vs.Metadata.LastCommit)
+	}
+
+	// list indexed files
+	if len(vs.Metadata.IndexedFiles) > 0 {
+		response += fmt.Sprintf("\nindexed files (%d):\n", len(vs.Metadata.IndexedFiles))
+		for _, f := range vs.Metadata.IndexedFiles {
+			response += fmt.Sprintf("  • %s\n", f)
+		}
+	}
+
+	// list skipped files if any
+	if len(vs.Metadata.SkippedFiles) > 0 {
+		response += fmt.Sprintf("\nskipped files (%d):\n", len(vs.Metadata.SkippedFiles))
+		for _, sf := range vs.Metadata.SkippedFiles {
+			response += fmt.Sprintf("  • %s (%s)\n", sf.Path, sf.Reason)
+		}
+	}
+
+	return mcp.NewToolResultText(response), nil
+}
+
+func handleSearchByFile(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// get arguments
+	args, ok := request.Params.Arguments.(map[string]interface{})
+	if !ok {
+		return mcp.NewToolResultError("invalid arguments"), nil
+	}
+
+	path, ok := args["path"].(string)
+	if !ok || path == "" {
+		return mcp.NewToolResultError("path parameter is required"), nil
+	}
+
+	// use preloaded stores if available
+	var mss *MultiSourceStore
+
+	preloadMutex.RLock()
+	if preloadedMSS != nil {
+		mss = preloadedMSS
+	}
+	preloadMutex.RUnlock()
+
+	if mss == nil {
+		// load on-demand
+		indexDir := getDefaultIndexDir()
+		mss = NewMultiSourceStore(indexDir)
+		if err := mss.LoadAll(); err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("failed to load indexes: %v", err)), nil
+		}
+	}
+
+	// search all indexes for chunks matching the file path
+	var matches []struct {
+		source string
+		chunk  Chunk
+	}
+
+	pathLower := strings.ToLower(path)
+	for _, vs := range mss.Sources {
+		for _, chunk := range vs.Chunks {
+			if strings.Contains(strings.ToLower(chunk.Source), pathLower) {
+				matches = append(matches, struct {
+					source string
+					chunk  Chunk
+				}{source: chunk.Source, chunk: chunk})
+			}
+		}
+	}
+
+	if len(matches) == 0 {
+		return mcp.NewToolResultText(fmt.Sprintf("no chunks found matching path '%s'", path)), nil
+	}
+
+	// group by source file
+	byFile := make(map[string][]Chunk)
+	for _, m := range matches {
+		byFile[m.source] = append(byFile[m.source], m.chunk)
+	}
+
+	response := fmt.Sprintf("found %d chunks from %d files matching '%s':\n\n", len(matches), len(byFile), path)
+
+	for file, chunks := range byFile {
+		response += fmt.Sprintf("=== %s (%d chunks) ===\n\n", file, len(chunks))
+		for i, chunk := range chunks {
+			response += fmt.Sprintf("--- chunk %d ---\n", i+1)
+			response += chunk.Text
+			response += "\n\n"
+		}
 	}
 
 	return mcp.NewToolResultText(response), nil
