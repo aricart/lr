@@ -186,6 +186,76 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 	return result, err
 }
 
+// LoadSpecificFiles loads only the specified files from rootDir
+func LoadSpecificFiles(rootDir string, files []string, docType string, maxFileSize int64, splitLarge bool) (LoadResult, error) {
+	result := LoadResult{
+		Documents:    []Document{},
+		SkippedFiles: []SkippedFile{},
+		TotalFiles:   len(files),
+	}
+
+	for _, relPath := range files {
+		path := filepath.Join(rootDir, relPath)
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
+				Path:   relPath,
+				Reason: fmt.Sprintf("read error: %v", err),
+			})
+			continue
+		}
+
+		// determine file type
+		fileType := docType
+		if strings.HasSuffix(path, ".go") {
+			fileType = "go"
+		} else if strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".jsx") {
+			fileType = "javascript"
+		} else if strings.HasSuffix(path, ".ts") || strings.HasSuffix(path, ".tsx") {
+			fileType = "typescript"
+		} else if strings.HasSuffix(path, ".templ") {
+			fileType = "templ"
+		} else if strings.HasSuffix(path, ".py") {
+			fileType = "python"
+		} else if strings.HasSuffix(path, ".java") {
+			fileType = "java"
+		} else if strings.HasSuffix(path, ".c") || strings.HasSuffix(path, ".h") {
+			fileType = "c"
+		} else if strings.HasSuffix(path, ".md") {
+			fileType = "markdown"
+		}
+
+		// handle large files
+		if int64(len(content)) > maxFileSize {
+			if splitLarge {
+				splitDocs := splitLargeFile(string(content), relPath, fileType, int(maxFileSize))
+				result.Documents = append(result.Documents, splitDocs...)
+			} else {
+				result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
+					Path:   relPath,
+					Reason: fmt.Sprintf("too large (%dKB)", len(content)/1024),
+					Size:   int64(len(content)),
+				})
+			}
+			continue
+		}
+
+		doc := Document{
+			Content: string(content),
+			Source:  relPath,
+			Metadata: map[string]string{
+				"path": relPath,
+				"type": fileType,
+			},
+		}
+
+		result.Documents = append(result.Documents, doc)
+	}
+
+	return result, nil
+}
+
 // splitLargeFile splits a large file into multiple documents
 func splitLargeFile(content, path, fileType string, maxSize int) []Document {
 	var docs []Document

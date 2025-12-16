@@ -56,6 +56,37 @@ func (vs *VectorStore) Add(chunk Chunk, embedding []float64) {
 	vs.Embeddings = append(vs.Embeddings, embedding)
 }
 
+// RemoveBySource removes all chunks from files matching the given paths
+func (vs *VectorStore) RemoveBySource(paths []string) int {
+	if len(paths) == 0 {
+		return 0
+	}
+
+	// build lookup set
+	pathSet := make(map[string]bool)
+	for _, p := range paths {
+		pathSet[p] = true
+	}
+
+	// filter chunks and embeddings
+	newChunks := make([]Chunk, 0, len(vs.Chunks))
+	newEmbeddings := make([][]float64, 0, len(vs.Embeddings))
+	removed := 0
+
+	for i, chunk := range vs.Chunks {
+		if pathSet[chunk.Source] {
+			removed++
+		} else {
+			newChunks = append(newChunks, chunk)
+			newEmbeddings = append(newEmbeddings, vs.Embeddings[i])
+		}
+	}
+
+	vs.Chunks = newChunks
+	vs.Embeddings = newEmbeddings
+	return removed
+}
+
 // Search finds the most similar chunks to the query embedding
 func (vs *VectorStore) Search(queryEmbedding []float64, topK int) []SearchResult {
 	var results []SearchResult

@@ -22,7 +22,8 @@ humans or tools with factual and almost hallucination-free constructs.
 ## features
 
 - index local directories or git repositories
-- intelligent code-aware chunking for go, javascript, typescript, templ, python, java, and c
+- intelligent code-aware chunking for go, javascript, typescript, templ, python,
+  java, and c
 - markdown documentation support
 - multiple embedding providers:
   - openai (text-embedding-3-small)
@@ -36,6 +37,8 @@ humans or tools with factual and almost hallucination-free constructs.
 - interactive cli mode
 - model context protocol (mcp) server for ai agent integration
 - checkpoint/resume support for long indexing jobs
+- incremental updates (only re-index changed files via git or mtime detection)
+- bulk update all indexes with automatic backup
 
 ## architecture
 
@@ -139,6 +142,8 @@ lr index --src /path/to/repo --code --out-name myproject
 - `--max-file-size`: maximum file size in bytes (default: 100KB)
 - `--split-large`: split large files into sections instead of skipping
 - `--include-tests`: include test files (useful for usage examples)
+- `--update`: incrementally update existing index (only re-index changed files)
+- `--git`: use git to detect changes (default: file mtime)
 
 **examples:**
 
@@ -154,6 +159,9 @@ lr index --src ./large-repo --code --max-file-size 200000 --split-large --out-na
 
 # dry run to see what would be indexed
 lr index --src ./myproject --code --docs --dry-run
+
+# incrementally update an existing index (only changed files)
+lr index --src ./myproject --code --out-name myproject --update
 ```
 
 **output:** creates compressed index at
@@ -422,6 +430,57 @@ you can override them with environment variables:
   XDG_CONFIG_HOME - base directory for config files
 ```
 
+### `lr update-all` - bulk update all indexes
+
+incrementally update all indexes that have recorded source paths. creates a
+backup before making any changes.
+
+**usage:**
+
+```bash
+lr update-all
+```
+
+**flags:**
+
+- `--git`: force git-based change detection (default: auto-detect)
+
+**what it does:**
+
+1. **scans** all indexes and detects changes (without modifying anything)
+2. **shows summary** of what needs updating and git warnings
+3. **creates backup** of all indexes before any updates
+4. **updates** only indexes that have changes
+
+**example output:**
+
+```
+scanning indexes for changes...
+  - old-index.lrindex: no source path
+  ✓ nats-server_20251109.lrindex: /path/to/nats-server
+
+=== SCAN RESULTS ===
+  ✓ nats-server: 2 added, 48 modified, 0 deleted
+  - nats-go: up to date
+
+=== GIT WARNINGS ===
+  ⚠ nats-go: 4 commits behind remote (consider: cd /path/to/nats.go && git pull)
+
+1 index(es) need updating with 50 total file changes
+
+creating backup in backup_20251215_201550...
+backed up 10 index files
+
+updating indexes...
+```
+
+**notes:**
+
+- indexes without source paths are skipped (re-index from scratch to add path)
+- auto-uses git-based detection if index has `LastCommit` metadata
+- backup directory is kept after completion for safety
+- if no changes detected, exits early without creating backup
+
 ## query modes comparison
 
 | mode                | command                                  | speed                | cost                         | when to use                   |
@@ -572,6 +631,7 @@ lr query "examples of error handling patterns"
 ├── paths.go             # xdg directory paths
 ├── loader.go            # file loading with filtering
 ├── chunker.go           # semantic chunking (code/markdown)
+├── incremental.go       # incremental update detection (git/mtime)
 ├── vectorstore.go       # compressed index storage (.lrindex)
 ├── multisource.go       # multi-repository querying
 ├── rag.go               # retrieval-augmented generation
@@ -595,6 +655,7 @@ lr query "examples of error handling patterns"
 - **paths.go**: xdg directory path handling
 - **loader.go**: recursive file discovery, extension filtering, size limits
 - **chunker.go**: splits code by functions/classes, markdown by headers
+- **incremental.go**: change detection via git diff or file mtime, atomic saves
 - **vectorstore.go**: compressed index storage (.lrindex), cosine similarity
   search
 - **multisource.go**: aggregates searches across multiple indexes
@@ -604,7 +665,8 @@ lr query "examples of error handling patterns"
 
 ## supported file types
 
-- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.templ`, `.py`, `.java`, `.c`, `.h`
+- **code**: `.go`, `.js`, `.ts`, `.jsx`, `.tsx`, `.templ`, `.py`, `.java`, `.c`,
+  `.h`
 - **documentation**: `.md`
 
 ## example workflow
@@ -683,7 +745,8 @@ then in claude code, just ask questions naturally:
 - [ ] url support for `--src` (auto-clone repos)
 - [ ] more languages (rust, c++, c#, ruby, php)
 - [ ] ast-based parsing for better chunking
-- [ ] incremental updates (only re-index changed files)
+- [x] incremental updates (only re-index changed files) - `--update` flag and
+      `update-all` command
 - [ ] parallel embedding generation
 - [ ] semantic caching for common queries
 - [ ] faiss or similar for approximate nearest neighbor search

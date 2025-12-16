@@ -11,13 +11,18 @@ import (
 // VoyageClient handles Voyage AI API requests
 type VoyageClient struct {
 	APIKey string
+	Model  string
 	Client *http.Client
 }
 
 // NewVoyageClient creates a new Voyage AI client
-func NewVoyageClient(apiKey string) *VoyageClient {
+func NewVoyageClient(apiKey, model string) *VoyageClient {
+	if model == "" {
+		model = "voyage-code-2"
+	}
 	return &VoyageClient{
 		APIKey: apiKey,
+		Model:  model,
 		Client: &http.Client{},
 	}
 }
@@ -39,7 +44,7 @@ type VoyageEmbeddingResponse struct {
 func (v *VoyageClient) GetEmbedding(text string) ([]float64, error) {
 	reqBody := VoyageEmbeddingRequest{
 		Input: []string{text},
-		Model: "voyage-code-2", // optimized for code
+		Model: v.Model,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -79,7 +84,7 @@ func (v *VoyageClient) GetEmbedding(text string) ([]float64, error) {
 }
 
 // Chat is not supported by Voyage (they only do embeddings)
-func (v *VoyageClient) Chat(messages []Message) (string, error) {
+func (v *VoyageClient) Chat(_ []Message) (string, error) {
 	return "", fmt.Errorf("voyage ai does not support chat - use claude or openai")
 }
 
@@ -90,10 +95,10 @@ type VoyageClaudeClient struct {
 }
 
 // NewVoyageClaudeClient creates a client using Voyage embeddings + Claude chat
-func NewVoyageClaudeClient(voyageKey, claudeKey string) *VoyageClaudeClient {
+func NewVoyageClaudeClient(voyageKey, claudeKey, embeddingModel, chatModel string) *VoyageClaudeClient {
 	return &VoyageClaudeClient{
-		Voyage: NewVoyageClient(voyageKey),
-		Claude: NewAnthropicClient(claudeKey),
+		Voyage: NewVoyageClient(voyageKey, embeddingModel),
+		Claude: NewAnthropicClient(claudeKey, chatModel),
 	}
 }
 
