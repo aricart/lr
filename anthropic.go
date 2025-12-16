@@ -11,13 +11,18 @@ import (
 // AnthropicClient handles Anthropic API requests
 type AnthropicClient struct {
 	APIKey string
+	Model  string
 	Client *http.Client
 }
 
 // NewAnthropicClient creates a new Anthropic client
-func NewAnthropicClient(apiKey string) *AnthropicClient {
+func NewAnthropicClient(apiKey, model string) *AnthropicClient {
+	if model == "" {
+		model = "claude-sonnet-4-5-20250929"
+	}
 	return &AnthropicClient{
 		APIKey: apiKey,
+		Model:  model,
 		Client: &http.Client{},
 	}
 }
@@ -25,7 +30,7 @@ func NewAnthropicClient(apiKey string) *AnthropicClient {
 // GetEmbedding gets an embedding using Voyage AI (Anthropic's recommended provider)
 // Note: Anthropic doesn't provide embeddings directly, so we still need OpenAI or Voyage
 // For simplicity, we'll use a wrapper that falls back to OpenAI embeddings
-func (c *AnthropicClient) GetEmbedding(text string) ([]float64, error) {
+func (c *AnthropicClient) GetEmbedding(_ string) ([]float64, error) {
 	// anthropic doesn't provide embeddings, so we need to use openai for this part
 	// you could also use voyage ai or other embedding providers
 	return nil, fmt.Errorf("embeddings not supported directly by anthropic - use openai for embeddings")
@@ -71,8 +76,8 @@ func (c *AnthropicClient) Chat(messages []Message) (string, error) {
 	}
 
 	reqBody := AnthropicChatRequest{
-		Model:     "claude-sonnet-4-20250514",
-		MaxTokens: 4096,
+		Model:     c.Model,
+		MaxTokens: 8192,
 		Messages:  userMessages,
 		System:    systemPrompt,
 	}

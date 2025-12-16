@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,40 +14,9 @@ import (
 )
 
 const (
-	vectorStoreFile    = "nats_vectorstore.json"
-	checkpointFile     = "nats_vectorstore.checkpoint.json"
-	docsDir            = "nats.docs"
-	natsGoDir          = "nats.go"
-	natsJsDir          = "nats.js"
-	natsServerDir      = "nats-server"
-	nscDir             = "nsc"
-	natscliDir         = "natscli"
-	jwtAuthBuilderDir  = "jwt-auth-builder.go"
-	nstGoDir           = "nst.go"
-	jsperftoolDir      = "jsperftool"
 	maxChunkSize       = 1500
-	maxChunkTokens     = 6000 // openai limit is 8192, leaving buffer
-	checkpointInterval = 100  // save every 100 chunks
+	checkpointInterval = 100 // save every 100 chunks
 )
-
-// source represents a documentation/code source to index
-type source struct {
-	dir    string
-	id     string // unique identifier for vector store file
-	loader func(string) ([]Document, error)
-	name   string
-}
-
-var sources = []source{
-	{dir: docsDir, id: "docs", loader: LoadMarkdownFiles, name: "NATS Documentation"},
-	{dir: natsGoDir, id: "nats-go", loader: LoadCodeFiles, name: "NATS Go Client"},
-	{dir: natsJsDir, id: "nats-js", loader: LoadCodeFiles, name: "NATS JavaScript Client"},
-	{dir: nscDir, id: "nsc", loader: LoadCodeFiles, name: "NSC (NATS Configuration Tool)"},
-	{dir: natscliDir, id: "natscli", loader: LoadCodeFiles, name: "NATS CLI"},
-	{dir: jwtAuthBuilderDir, id: "jwt-auth-builder", loader: LoadCodeFiles, name: "JWT Auth Builder"},
-	{dir: nstGoDir, id: "nst", loader: LoadCodeFiles, name: "NST (NATS Server Test Utilities)"},
-	{dir: jsperftoolDir, id: "jsperftool", loader: LoadCodeFiles, name: "JetStream Perf Tool"},
-}
 
 var (
 	// index command flags
@@ -59,9 +29,10 @@ var (
 	maxFileSize  int64
 	splitLarge   bool
 	includeTests bool
+	updateIndex  bool
+	useGit       bool
 
 	// query command flags
-	queryText    string
 	topK         int
 	querySources []string
 	useMCP       bool
@@ -71,7 +42,51 @@ var (
 	noPreload bool
 	reloadPid int
 	reloadAll bool
+
+	// model configuration flags
+	chatModel      string
+	embeddingModel string
 )
+
+// model aliases for convenience
+var chatModelAliases = map[string]string{
+	"sonnet":      "claude-sonnet-4-5-20250929",
+	"haiku":       "claude-haiku-4-5-20251001",
+	"opus":        "claude-opus-4-5-20251101",
+	"gpt-4o":      "gpt-4o",
+	"gpt-4o-mini": "gpt-4o-mini",
+}
+
+var embeddingModelAliases = map[string]string{
+	"openai":  "text-embedding-3-small",
+	"voyage":  "voyage-code-2",
+	"voyage3": "voyage-3",
+}
+
+// default chat model
+const defaultChatModel = "claude-sonnet-4-5-20250929"
+
+// resolveChatModel resolves a model alias to its full model ID
+func resolveChatModel(model string) string {
+	if model == "" {
+		return defaultChatModel
+	}
+	if resolved, ok := chatModelAliases[model]; ok {
+		return resolved
+	}
+	return model // assume it's a full model ID
+}
+
+// resolveEmbeddingModel resolves an embedding model alias to its full model ID
+func resolveEmbeddingModel(model string) string {
+	if model == "" {
+		return "" // will be auto-detected
+	}
+	if resolved, ok := embeddingModelAliases[model]; ok {
+		return resolved
+	}
+	return model // assume it's a full model ID
+}
 
 var rootCmd = &cobra.Command{
 	Use:   "lr",
@@ -129,6 +144,13 @@ var pathsCmd = &cobra.Command{
 	Run:   runPaths,
 }
 
+var updateAllCmd = &cobra.Command{
+	Use:   "update-all",
+	Short: "Update all indexes that have source paths",
+	Long:  `Incrementally update all indexes that have recorded source paths. Creates a backup before updating.`,
+	RunE:  runUpdateAll,
+}
+
 func init() {
 	// load .env file if it exists (check current dir, then config dir)
 	envPath := getEnvFilePath()
@@ -149,6 +171,8 @@ func init() {
 	indexCmd.Flags().Int64Var(&maxFileSize, "max-file-size", 100*1024, "maximum file size in bytes (default 100KB)")
 	indexCmd.Flags().BoolVar(&splitLarge, "split-large", false, "split large files into sections instead of skipping them")
 	indexCmd.Flags().BoolVar(&includeTests, "include-tests", false, "include test files (often contain useful usage examples)")
+	indexCmd.Flags().BoolVar(&updateIndex, "update", false, "incrementally update existing index (only re-index changed files)")
+	indexCmd.Flags().BoolVar(&useGit, "git", false, "use git to detect changes (default: file mtime)")
 	indexCmd.MarkFlagRequired("src")
 
 	// query command flags
@@ -162,6 +186,13 @@ func init() {
 	mcpCmd.Flags().IntVar(&reloadPid, "reload", 0, "send reload signal to mcp server with given pid")
 	mcpCmd.Flags().BoolVar(&reloadAll, "reload-all", false, "send reload signal to all lr mcp processes")
 
+	// model configuration flags (persistent, available to all commands)
+	rootCmd.PersistentFlags().StringVar(&chatModel, "model", "", "chat model to use (aliases: sonnet, haiku, opus, gpt-4o, gpt-4o-mini)")
+	rootCmd.PersistentFlags().StringVar(&embeddingModel, "embedding-model", "", "embedding model (aliases: openai, voyage, voyage3)")
+
+	// update-all command flags
+	updateAllCmd.Flags().BoolVar(&useGit, "git", false, "use git to detect changes (default: file mtime)")
+
 	// add commands
 	rootCmd.AddCommand(indexCmd)
 	rootCmd.AddCommand(queryCmd)
@@ -170,6 +201,7 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(pathsCmd)
+	rootCmd.AddCommand(updateAllCmd)
 }
 
 func main() {
@@ -184,16 +216,37 @@ func getLLMClient() (LLMClient, error) {
 	claudeKey := os.Getenv("ANTHROPIC_API_KEY")
 	voyageKey := os.Getenv("VOYAGE_API_KEY")
 
+	// resolve model aliases
+	resolvedChatModel := resolveChatModel(chatModel)
+	resolvedEmbeddingModel := resolveEmbeddingModel(embeddingModel)
+
 	// priority order for embedding+chat combinations
 	if voyageKey != "" && claudeKey != "" {
-		fmt.Println("using voyage ai embeddings + claude chat (recommended for code!)")
-		return NewVoyageClaudeClient(voyageKey, claudeKey), nil
+		embModel := resolvedEmbeddingModel
+		if embModel == "" {
+			embModel = "voyage-code-2"
+		}
+		fmt.Printf("using voyage ai embeddings (%s) + claude chat (%s)\n", embModel, resolvedChatModel)
+		return NewVoyageClaudeClient(voyageKey, claudeKey, embModel, resolvedChatModel), nil
 	} else if openaiKey != "" && claudeKey != "" {
-		fmt.Println("using openai embeddings + claude chat")
-		return NewHybridClient(openaiKey, claudeKey), nil
+		embModel := resolvedEmbeddingModel
+		if embModel == "" {
+			embModel = "text-embedding-3-small"
+		}
+		fmt.Printf("using openai embeddings (%s) + claude chat (%s)\n", embModel, resolvedChatModel)
+		return NewHybridClient(openaiKey, claudeKey, embModel, resolvedChatModel), nil
 	} else if openaiKey != "" {
-		fmt.Println("using openai for embeddings and chat")
-		return NewOpenAIClient(openaiKey), nil
+		embModel := resolvedEmbeddingModel
+		if embModel == "" {
+			embModel = "text-embedding-3-small"
+		}
+		// for openai-only, use gpt model if no claude model specified
+		chatModelToUse := resolvedChatModel
+		if chatModel == "" {
+			chatModelToUse = "gpt-4o-mini"
+		}
+		fmt.Printf("using openai for embeddings (%s) and chat (%s)\n", embModel, chatModelToUse)
+		return NewOpenAIClient(openaiKey, chatModelToUse, embModel), nil
 	}
 
 	return nil, fmt.Errorf("no api key found. please set one of:\n" +
@@ -240,7 +293,7 @@ func estimateCost(numChunks int) {
 	fmt.Printf("  - %s: $%.3f per 1M tokens\n", provider, embeddingCost)
 }
 
-func runIndex(cmd *cobra.Command, args []string) error {
+func runIndex(_ *cobra.Command, _ []string) error {
 	// validate flags
 	if !dryRun {
 		if outPath == "" && outName == "" {
@@ -251,6 +304,16 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// --update requires --out-name (to find existing index)
+	if updateIndex && outName == "" {
+		return fmt.Errorf("--update requires --out-name to find existing index")
+	}
+
+	// --git requires --update
+	if useGit && !updateIndex {
+		return fmt.Errorf("--git only works with --update")
+	}
+
 	// construct final output path
 	var finalOutPath string
 	if outName != "" {
@@ -259,6 +322,11 @@ func runIndex(cmd *cobra.Command, args []string) error {
 		finalOutPath = filepath.Join(indexDir, fmt.Sprintf("%s_%s.lrindex", outName, timestamp))
 	} else {
 		finalOutPath = outPath
+	}
+
+	// handle incremental update
+	if updateIndex {
+		return runIncrementalIndex(finalOutPath)
 	}
 
 	fmt.Printf("analyzing source: %s\n", srcPath)
@@ -342,7 +410,7 @@ func runIndex(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runQuery(cmd *cobra.Command, args []string) error {
+func runQuery(_ *cobra.Command, args []string) error {
 	question := strings.Join(args, " ")
 
 	// if --use-mcp flag is set, query via MCP server
@@ -402,7 +470,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runList(cmd *cobra.Command, args []string) error {
+func runList(_ *cobra.Command, _ []string) error {
 	indexDir := getDefaultIndexDir()
 
 	// check if directory exists
@@ -484,7 +552,230 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runInteractive(cmd *cobra.Command, args []string) error {
+func runUpdateAll(_ *cobra.Command, _ []string) error {
+	indexDir := getDefaultIndexDir()
+
+	// check if directory exists
+	if _, err := os.Stat(indexDir); os.IsNotExist(err) {
+		return fmt.Errorf("no indexes found - run 'lr index' first")
+	}
+
+	// find all index files
+	pattern := filepath.Join(indexDir, "*.lrindex")
+	files, err := filepath.Glob(pattern)
+	if err != nil {
+		return fmt.Errorf("error searching for indexes: %w", err)
+	}
+
+	// filter out checkpoint and temp files
+	var validFiles []string
+	for _, file := range files {
+		base := filepath.Base(file)
+		if !strings.Contains(base, "checkpoint") && !strings.Contains(base, ".tmp.") {
+			validFiles = append(validFiles, file)
+		}
+	}
+
+	if len(validFiles) == 0 {
+		return fmt.Errorf("no indexes found")
+	}
+
+	// find indexes that have source paths and scan for changes
+	type indexInfo struct {
+		path        string
+		name        string
+		sourcePath  string
+		isGitRepo   bool
+		vs          *VectorStore
+		changeSet   *ChangeSet
+		needsPull   bool
+		behindCount int
+	}
+	var updatable []indexInfo
+
+	fmt.Println("scanning indexes for changes...")
+	for _, file := range validFiles {
+		vs := NewVectorStore()
+		if err := vs.Load(file); err != nil {
+			fmt.Printf("  ✗ %s: error loading\n", filepath.Base(file))
+			continue
+		}
+
+		if vs.Metadata.SourcePath == "" {
+			fmt.Printf("  - %s: no source path\n", filepath.Base(file))
+			continue
+		}
+
+		// check if source path exists
+		if _, err := os.Stat(vs.Metadata.SourcePath); os.IsNotExist(err) {
+			fmt.Printf("  ✗ %s: source not found: %s\n", filepath.Base(file), vs.Metadata.SourcePath)
+			continue
+		}
+
+		// extract name from filename
+		name := strings.TrimSuffix(filepath.Base(file), ".lrindex")
+		// remove date suffix
+		if parts := strings.Split(name, "_"); len(parts) > 1 {
+			lastPart := parts[len(parts)-1]
+			if len(lastPart) == 8 {
+				name = strings.Join(parts[:len(parts)-1], "_")
+			}
+		}
+
+		info := indexInfo{
+			path:       file,
+			name:       name,
+			sourcePath: vs.Metadata.SourcePath,
+			isGitRepo:  isGitRepo(vs.Metadata.SourcePath),
+			vs:         vs,
+		}
+
+		// determine extensions (default to code)
+		extensions := []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
+
+		// detect changes
+		if info.isGitRepo && vs.Metadata.LastCommit != "" {
+			// check if behind remote
+			behind := getGitBehindCount(vs.Metadata.SourcePath)
+			if behind > 0 {
+				info.needsPull = true
+				info.behindCount = behind
+			}
+
+			// git-based change detection
+			cs, err := detectChangesGit(vs.Metadata.SourcePath, vs.Metadata.LastCommit, extensions)
+			if err == nil {
+				info.changeSet = cs
+			}
+		} else if vs.Metadata.IndexedAt != "" {
+			// mtime-based change detection
+			indexedAt, err := time.Parse(time.RFC3339, vs.Metadata.IndexedAt)
+			if err == nil {
+				cs, err := detectChangesMtime(vs.Metadata.SourcePath, indexedAt, vs.Metadata.IndexedFiles, extensions)
+				if err == nil {
+					info.changeSet = cs
+				}
+			}
+		}
+
+		updatable = append(updatable, info)
+	}
+
+	if len(updatable) == 0 {
+		fmt.Println("\nno updatable indexes found (indexes need source paths)")
+		return nil
+	}
+
+	// show scan results
+	fmt.Printf("\n=== SCAN RESULTS ===\n")
+	var totalChanges int
+	var needsWork []indexInfo
+	var pullWarnings []string
+
+	for _, idx := range updatable {
+		if idx.needsPull {
+			pullWarnings = append(pullWarnings, fmt.Sprintf("  ⚠ %s: %d commits behind remote (consider: cd %s && git pull)",
+				idx.name, idx.behindCount, idx.sourcePath))
+		}
+
+		if idx.changeSet != nil && idx.changeSet.HasChanges() {
+			changes := len(idx.changeSet.Added) + len(idx.changeSet.Modified) + len(idx.changeSet.Deleted)
+			totalChanges += changes
+			needsWork = append(needsWork, idx)
+			fmt.Printf("  ✓ %s: %d added, %d modified, %d deleted\n",
+				idx.name, len(idx.changeSet.Added), len(idx.changeSet.Modified), len(idx.changeSet.Deleted))
+		} else if idx.changeSet != nil {
+			fmt.Printf("  - %s: up to date\n", idx.name)
+		} else {
+			fmt.Printf("  ? %s: could not detect changes\n", idx.name)
+		}
+	}
+
+	// show pull warnings
+	if len(pullWarnings) > 0 {
+		fmt.Printf("\n=== GIT WARNINGS ===\n")
+		for _, w := range pullWarnings {
+			fmt.Println(w)
+		}
+	}
+
+	// if no work needed, exit early
+	if len(needsWork) == 0 {
+		fmt.Println("\nall indexes are up to date - nothing to do")
+		return nil
+	}
+
+	fmt.Printf("\n%d index(es) need updating with %d total file changes\n", len(needsWork), totalChanges)
+
+	// create backup directory
+	backupDir := filepath.Join(indexDir, fmt.Sprintf("backup_%s", time.Now().Format("20060102_150405")))
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return fmt.Errorf("failed to create backup directory: %w", err)
+	}
+	fmt.Printf("\ncreating backup in %s...\n", filepath.Base(backupDir))
+
+	// backup all index files
+	for _, file := range validFiles {
+		src := file
+		dst := filepath.Join(backupDir, filepath.Base(file))
+		srcFile, err := os.Open(src)
+		if err != nil {
+			return fmt.Errorf("failed to open %s for backup: %w", filepath.Base(src), err)
+		}
+		dstFile, err := os.Create(dst)
+		if err != nil {
+			srcFile.Close()
+			return fmt.Errorf("failed to create backup file %s: %w", filepath.Base(dst), err)
+		}
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			srcFile.Close()
+			dstFile.Close()
+			return fmt.Errorf("failed to backup %s: %w", filepath.Base(src), err)
+		}
+		srcFile.Close()
+		dstFile.Close()
+	}
+	fmt.Printf("backed up %d index files\n", len(validFiles))
+
+	// get LLM client
+	llm, err := getLLMClient()
+	if err != nil {
+		return fmt.Errorf("failed to initialize LLM client: %w", err)
+	}
+
+	// update only indexes that need work
+	fmt.Println("\nupdating indexes...")
+	var successCount, failCount int
+
+	for _, idx := range needsWork {
+		fmt.Printf("\n=== Updating %s ===\n", idx.name)
+
+		// set global variables for runIncrementalIndex
+		srcPath = idx.sourcePath
+		outName = idx.name
+
+		// determine output path
+		finalOutPath := filepath.Join(indexDir, fmt.Sprintf("%s_%s.lrindex", idx.name, time.Now().Format("20060102")))
+
+		// run incremental update using existing function
+		if err := runIncrementalIndexWithLLM(llm, finalOutPath); err != nil {
+			fmt.Printf("✗ failed to update %s: %v\n", idx.name, err)
+			failCount++
+			continue
+		}
+
+		successCount++
+	}
+
+	fmt.Printf("\n=== Summary ===\n")
+	fmt.Printf("updated: %d\n", successCount)
+	fmt.Printf("failed: %d\n", failCount)
+	fmt.Printf("backup: %s\n", backupDir)
+
+	return nil
+}
+
+func runInteractive(_ *cobra.Command, _ []string) error {
 	llm, err := getLLMClient()
 	if err != nil {
 		return err
@@ -540,11 +831,11 @@ func runInteractive(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runMCP(cmd *cobra.Command, args []string) error {
+func runMCP(_ *cobra.Command, _ []string) error {
 	return serveMCP()
 }
 
-func runPaths(cmd *cobra.Command, args []string) {
+func runPaths(_ *cobra.Command, _ []string) {
 	fmt.Println("=== lr data directories ===")
 	fmt.Println()
 	fmt.Printf("indexes:  %s\n", getDefaultIndexDir())
@@ -557,7 +848,7 @@ func runPaths(cmd *cobra.Command, args []string) {
 	fmt.Println("  XDG_CONFIG_HOME - base directory for config files")
 }
 
-func runSetup(cmd *cobra.Command, args []string) error {
+func runSetup(_ *cobra.Command, _ []string) error {
 	// get the absolute path to the lr binary
 	execPath, err := os.Executable()
 	if err != nil {
@@ -692,6 +983,30 @@ func indexSingleSource(llm LLMClient, srcPath, outPath string, loader func(strin
 	bar.Finish()
 	fmt.Println()
 
+	// set metadata before saving
+	absPath, _ := filepath.Abs(srcPath)
+	vs.Metadata.SourcePath = absPath
+	vs.Metadata.IndexedAt = time.Now().Format(time.RFC3339)
+	vs.Metadata.ChunkCount = len(vs.Chunks)
+	vs.Metadata.FileCount = len(docs)
+
+	// populate indexed files list
+	fileSet := make(map[string]bool)
+	for _, doc := range docs {
+		fileSet[doc.Source] = true
+	}
+	vs.Metadata.IndexedFiles = make([]string, 0, len(fileSet))
+	for f := range fileSet {
+		vs.Metadata.IndexedFiles = append(vs.Metadata.IndexedFiles, f)
+	}
+
+	// record git commit if in a git repo
+	if isGitRepo(srcPath) {
+		if commit, err := getGitHeadCommit(srcPath); err == nil {
+			vs.Metadata.LastCommit = commit
+		}
+	}
+
 	// save final vector store
 	fmt.Printf("saving %s...\n", outputFile)
 	if err := vs.Save(outputFile); err != nil {
@@ -708,135 +1023,238 @@ func indexSingleSource(llm LLMClient, srcPath, outPath string, loader func(strin
 	return nil
 }
 
-func indexDocumentation(llm LLMClient) error {
+func runIncrementalIndex(finalOutPath string) error {
+	// get LLM client
+	llm, err := getLLMClient()
+	if err != nil {
+		return err
+	}
+	return runIncrementalIndexWithLLM(llm, finalOutPath)
+}
+
+func runIncrementalIndexWithLLM(llm LLMClient, finalOutPath string) error {
 	start := time.Now()
 
-	totalChunks := 0
+	// find existing index
+	indexDir := getDefaultIndexDir()
+	existingIndex, err := findExistingIndex(indexDir, outName)
+	if err != nil {
+		return fmt.Errorf("cannot update: %w", err)
+	}
+	fmt.Printf("found existing index: %s\n", filepath.Base(existingIndex))
 
-	// index each source separately
-	for _, src := range sources {
-		fmt.Printf("\n=== indexing %s ===\n", src.name)
+	// load existing index
+	vs := NewVectorStore()
+	if err := vs.Load(existingIndex); err != nil {
+		return fmt.Errorf("failed to load existing index: %w", err)
+	}
+	fmt.Printf("loaded %d existing chunks\n", len(vs.Chunks))
 
-		// check if directory exists
-		if _, err := os.Stat(src.dir); os.IsNotExist(err) {
-			fmt.Printf("warning: %s directory not found, skipping\n", src.dir)
-			continue
+	// migrate old indexes: populate IndexedFiles from chunk sources if empty
+	if len(vs.Metadata.IndexedFiles) == 0 && len(vs.Chunks) > 0 {
+		fileSet := make(map[string]bool)
+		for _, chunk := range vs.Chunks {
+			fileSet[chunk.Source] = true
 		}
+		vs.Metadata.IndexedFiles = make([]string, 0, len(fileSet))
+		for f := range fileSet {
+			vs.Metadata.IndexedFiles = append(vs.Metadata.IndexedFiles, f)
+		}
+		fmt.Printf("migrated index: found %d indexed files from chunks\n", len(vs.Metadata.IndexedFiles))
+	}
 
-		// load files
-		fmt.Printf("loading files from %s...\n", src.dir)
-		docs, err := src.loader(src.dir)
+	// check source exists
+	if _, err := os.Stat(srcPath); os.IsNotExist(err) {
+		return fmt.Errorf("source directory not found: %s", srcPath)
+	}
+
+	// determine extensions
+	var extensions []string
+	var docType string
+	if useCode && useDocs {
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".md"}
+		docType = "mixed"
+	} else if useDocs {
+		extensions = []string{".md"}
+		docType = "markdown"
+	} else {
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
+		docType = "code"
+	}
+
+	// detect changes - auto-use git if index has LastCommit and source is a git repo
+	var changeSet *ChangeSet
+	canUseGit := vs.Metadata.LastCommit != "" && isGitRepo(srcPath)
+	if useGit || canUseGit {
+		// git-based detection
+		if !isGitRepo(srcPath) {
+			return fmt.Errorf("--git specified but %s is not a git repository", srcPath)
+		}
+		if vs.Metadata.LastCommit == "" {
+			return fmt.Errorf("existing index has no LastCommit - full re-index required")
+		}
+		fmt.Printf("detecting changes since commit %s...\n", vs.Metadata.LastCommit[:8])
+		changeSet, err = detectChangesGit(srcPath, vs.Metadata.LastCommit, extensions)
 		if err != nil {
-			return fmt.Errorf("failed to load %s: %w", src.name, err)
+			return fmt.Errorf("git change detection failed: %w", err)
 		}
-		fmt.Printf("loaded %d files\n", len(docs))
+	} else {
+		// mtime-based detection
+		var indexedAt time.Time
+		if vs.Metadata.IndexedAt != "" {
+			indexedAt, err = time.Parse(time.RFC3339, vs.Metadata.IndexedAt)
+			if err != nil {
+				return fmt.Errorf("cannot parse IndexedAt timestamp: %w", err)
+			}
+		} else {
+			// fallback: extract date from index filename (e.g., name_20251109.lrindex)
+			baseName := filepath.Base(existingIndex)
+			// find the date part (8 digits before .lrindex)
+			if idx := strings.LastIndex(baseName, "_"); idx > 0 {
+				datePart := strings.TrimSuffix(baseName[idx+1:], ".lrindex")
+				if len(datePart) == 8 {
+					indexedAt, err = time.Parse("20060102", datePart)
+					if err != nil {
+						return fmt.Errorf("cannot extract date from index filename: %w", err)
+					}
+				}
+			}
+			if indexedAt.IsZero() {
+				// last resort: use file modification time
+				info, err := os.Stat(existingIndex)
+				if err != nil {
+					return fmt.Errorf("cannot stat index file: %w", err)
+				}
+				indexedAt = info.ModTime()
+			}
+		}
+		fmt.Printf("detecting changes since %s...\n", indexedAt.Format("2006-01-02 15:04:05"))
+		changeSet, err = detectChangesMtime(srcPath, indexedAt, vs.Metadata.IndexedFiles, extensions)
+		if err != nil {
+			return fmt.Errorf("mtime change detection failed: %w", err)
+		}
+	}
 
-		// chunk documents
-		fmt.Println("chunking files...")
-		var chunks []Chunk
-		for _, doc := range docs {
+	// report changes
+	fmt.Printf("\n=== CHANGES DETECTED ===\n")
+	fmt.Printf("Added:    %d files\n", len(changeSet.Added))
+	fmt.Printf("Modified: %d files\n", len(changeSet.Modified))
+	fmt.Printf("Deleted:  %d files\n", len(changeSet.Deleted))
+
+	if !changeSet.HasChanges() {
+		fmt.Println("\nno changes detected - index is up to date")
+		return nil
+	}
+
+	// dry run - just show what would happen
+	if dryRun {
+		fmt.Println("\n=== DRY RUN ===")
+		if len(changeSet.Added) > 0 {
+			fmt.Println("Files to add:")
+			for _, f := range changeSet.Added {
+				fmt.Printf("  + %s\n", f)
+			}
+		}
+		if len(changeSet.Modified) > 0 {
+			fmt.Println("Files to re-index:")
+			for _, f := range changeSet.Modified {
+				fmt.Printf("  ~ %s\n", f)
+			}
+		}
+		if len(changeSet.Deleted) > 0 {
+			fmt.Println("Files to remove:")
+			for _, f := range changeSet.Deleted {
+				fmt.Printf("  - %s\n", f)
+			}
+		}
+		return nil
+	}
+
+	// remove chunks from modified/deleted files
+	toRemove := changeSet.RemovedFiles()
+	if len(toRemove) > 0 {
+		removed := vs.RemoveBySource(toRemove)
+		fmt.Printf("removed %d chunks from %d changed/deleted files\n", removed, len(toRemove))
+	}
+
+	// load changed files
+	changedFiles := changeSet.ChangedFiles()
+	if len(changedFiles) > 0 {
+		fmt.Printf("loading %d changed files...\n", len(changedFiles))
+		loadResult, err := LoadSpecificFiles(srcPath, changedFiles, docType, maxFileSize, splitLarge)
+		if err != nil {
+			return fmt.Errorf("failed to load changed files: %w", err)
+		}
+
+		// chunk new documents
+		var newChunks []Chunk
+		for _, doc := range loadResult.Documents {
 			docChunks := ChunkDocument(doc, maxChunkSize)
-			chunks = append(chunks, docChunks...)
+			newChunks = append(newChunks, docChunks...)
 		}
-		fmt.Printf("created %d chunks\n", len(chunks))
-		totalChunks += len(chunks)
+		fmt.Printf("created %d new chunks\n", len(newChunks))
 
-		// create embeddings for this source
-		if err := indexSource(llm, src.id, chunks); err != nil {
-			return fmt.Errorf("failed to index %s: %w", src.name, err)
+		if len(newChunks) > 0 {
+			// generate embeddings for new chunks
+			bar := progressbar.NewOptions(len(newChunks),
+				progressbar.OptionSetDescription("generating embeddings"),
+				progressbar.OptionShowCount(),
+				progressbar.OptionSetWidth(40),
+				progressbar.OptionThrottle(100*time.Millisecond),
+				progressbar.OptionShowIts(),
+				progressbar.OptionSetItsString("chunks"),
+			)
+
+			for _, chunk := range newChunks {
+				embedding, err := llm.GetEmbedding(chunk.Text)
+				if err != nil {
+					return fmt.Errorf("failed to get embedding: %w", err)
+				}
+				vs.Add(chunk, embedding)
+				bar.Add(1)
+				time.Sleep(50 * time.Millisecond) // rate limit
+			}
+			bar.Finish()
+			fmt.Println()
 		}
+
+		// update indexed files list
+		// remove deleted files, add new files
+		fileSet := make(map[string]bool)
+		for _, f := range vs.Metadata.IndexedFiles {
+			fileSet[f] = true
+		}
+		for _, f := range changeSet.Deleted {
+			delete(fileSet, f)
+		}
+		for _, f := range changeSet.Added {
+			fileSet[f] = true
+		}
+		vs.Metadata.IndexedFiles = make([]string, 0, len(fileSet))
+		for f := range fileSet {
+			vs.Metadata.IndexedFiles = append(vs.Metadata.IndexedFiles, f)
+		}
+	}
+
+	// update metadata
+	absPath, _ := filepath.Abs(srcPath)
+	vs.Metadata.SourcePath = absPath
+	vs.Metadata.IndexedAt = time.Now().Format(time.RFC3339)
+	vs.Metadata.ChunkCount = len(vs.Chunks)
+	vs.Metadata.FileCount = len(vs.Metadata.IndexedFiles)
+	if useGit {
+		commit, _ := getGitHeadCommit(srcPath)
+		vs.Metadata.LastCommit = commit
+	}
+
+	// atomic save
+	fmt.Printf("saving %s...\n", filepath.Base(finalOutPath))
+	if err := atomicSave(vs, finalOutPath); err != nil {
+		return fmt.Errorf("failed to save index: %w", err)
 	}
 
 	elapsed := time.Since(start)
-	fmt.Printf("\nindexing complete! indexed %d chunks in %s\n", totalChunks, elapsed.Round(time.Second))
-
-	return nil
-}
-
-func indexSource(llm LLMClient, sourceID string, chunks []Chunk) error {
-	vectorStoreDir := "vectorstore"
-	// ensure directory exists
-	if err := os.MkdirAll(vectorStoreDir, 0755); err != nil {
-		return fmt.Errorf("failed to create vectorstore directory: %w", err)
-	}
-
-	timestamp := time.Now().Format("20060102")
-	checkpointFile := filepath.Join(vectorStoreDir, fmt.Sprintf("nats_%s.checkpoint.json", sourceID))
-	outputFile := filepath.Join(vectorStoreDir, fmt.Sprintf("nats_%s_%s.json", sourceID, timestamp))
-
-	// try to load checkpoint if it exists
-	vs := NewVectorStore()
-	startIdx := 0
-
-	if _, err := os.Stat(checkpointFile); err == nil {
-		fmt.Printf("found checkpoint for %s, resuming...\n", sourceID)
-		if err := vs.Load(checkpointFile); err != nil {
-			fmt.Printf("warning: could not load checkpoint: %v\n", err)
-		} else {
-			startIdx = len(vs.Chunks)
-			fmt.Printf("resuming from chunk %d/%d\n", startIdx, len(chunks))
-		}
-	}
-
-	// create embeddings
-	var bar *progressbar.ProgressBar
-	if startIdx == 0 {
-		bar = progressbar.NewOptions(len(chunks),
-			progressbar.OptionSetDescription(fmt.Sprintf("generating embeddings (%s)", sourceID)),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionThrottle(100*time.Millisecond),
-			progressbar.OptionShowIts(),
-			progressbar.OptionSetItsString("chunks"),
-		)
-	} else {
-		remaining := len(chunks) - startIdx
-		bar = progressbar.NewOptions(remaining,
-			progressbar.OptionSetDescription("resuming embeddings"),
-			progressbar.OptionShowCount(),
-			progressbar.OptionSetWidth(40),
-			progressbar.OptionThrottle(100*time.Millisecond),
-			progressbar.OptionShowIts(),
-			progressbar.OptionSetItsString("chunks"),
-		)
-	}
-
-	for i := startIdx; i < len(chunks); i++ {
-		chunk := chunks[i]
-		embedding, err := llm.GetEmbedding(chunk.Text)
-		if err != nil {
-			return fmt.Errorf("failed to get embedding for chunk %d (source: %s, size: %d chars, ~%d tokens): %w",
-				i, chunk.Source, len(chunk.Text), len(chunk.Text)/4, err)
-		}
-
-		vs.Add(chunk, embedding)
-		bar.Add(1)
-
-		// save checkpoint periodically
-		if (i+1)%checkpointInterval == 0 {
-			if err := vs.Save(checkpointFile); err != nil {
-				fmt.Printf("\nwarning: failed to save checkpoint: %v\n", err)
-			}
-		}
-
-		// small delay to avoid rate limits
-		time.Sleep(50 * time.Millisecond)
-	}
-	bar.Finish()
-	fmt.Println()
-
-	// save final vector store
-	fmt.Printf("saving %s...\n", outputFile)
-	if err := vs.Save(outputFile); err != nil {
-		return fmt.Errorf("failed to save vector store: %w", err)
-	}
-
-	// remove checkpoint file since we completed successfully
-	if _, err := os.Stat(checkpointFile); err == nil {
-		os.Remove(checkpointFile)
-	}
-
-	fmt.Printf("✓ %s indexed successfully (%d chunks)\n", sourceID, len(chunks))
+	fmt.Printf("✓ incremental update complete (%d total chunks in %s)\n", len(vs.Chunks), elapsed.Round(time.Second))
 	return nil
 }
 

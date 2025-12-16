@@ -18,10 +18,10 @@ type HybridClient struct {
 }
 
 // NewHybridClient creates a client that uses OpenAI for embeddings and Claude for chat
-func NewHybridClient(openaiKey, claudeKey string) *HybridClient {
+func NewHybridClient(openaiKey, claudeKey, embeddingModel, chatModel string) *HybridClient {
 	return &HybridClient{
-		OpenAI: NewOpenAIClient(openaiKey),
-		Claude: NewAnthropicClient(claudeKey),
+		OpenAI: NewOpenAIClient(openaiKey, "", embeddingModel), // empty chat model since we use Claude for chat
+		Claude: NewAnthropicClient(claudeKey, chatModel),
 	}
 }
 

@@ -10,15 +10,25 @@ import (
 
 // OpenAIClient handles OpenAI API requests
 type OpenAIClient struct {
-	APIKey string
-	Client *http.Client
+	APIKey         string
+	ChatModel      string
+	EmbeddingModel string
+	Client         *http.Client
 }
 
 // NewOpenAIClient creates a new OpenAI client
-func NewOpenAIClient(apiKey string) *OpenAIClient {
+func NewOpenAIClient(apiKey, chatModel, embeddingModel string) *OpenAIClient {
+	if chatModel == "" {
+		chatModel = "gpt-4o-mini"
+	}
+	if embeddingModel == "" {
+		embeddingModel = "text-embedding-3-small"
+	}
 	return &OpenAIClient{
-		APIKey: apiKey,
-		Client: &http.Client{},
+		APIKey:         apiKey,
+		ChatModel:      chatModel,
+		EmbeddingModel: embeddingModel,
+		Client:         &http.Client{},
 	}
 }
 
@@ -39,7 +49,7 @@ type EmbeddingResponse struct {
 func (c *OpenAIClient) GetEmbedding(text string) ([]float64, error) {
 	reqBody := EmbeddingRequest{
 		Input: text,
-		Model: "text-embedding-3-small",
+		Model: c.EmbeddingModel,
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -100,7 +110,7 @@ type ChatResponse struct {
 // Chat sends a chat completion request
 func (c *OpenAIClient) Chat(messages []Message) (string, error) {
 	reqBody := ChatRequest{
-		Model:    "gpt-4o-mini",
+		Model:    c.ChatModel,
 		Messages: messages,
 	}
 
