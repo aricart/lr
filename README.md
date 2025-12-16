@@ -116,6 +116,25 @@ VOYAGE_API_KEY=your-key
 ANTHROPIC_API_KEY=your-key
 ```
 
+## global flags
+
+these flags work with any command:
+
+- `--embedding-model`: embedding provider (aliases: `openai`, `voyage`,
+  `voyage3`)
+- `--model`: chat model (aliases: `sonnet`, `haiku`, `opus`, `gpt-4o`,
+  `gpt-4o-mini`)
+
+**examples:**
+
+```bash
+# use voyage embeddings with claude opus
+lr query "how does auth work?" --embedding-model voyage --model opus
+
+# use openai for everything
+lr index --src ./repo --code --out-name repo --embedding-model openai --model gpt-4o
+```
+
 ## commands
 
 localrag provides several commands for different workflows:
@@ -318,9 +337,18 @@ the mcp server prints its pid at startup for easy reference.
 - allows updating indexes without restarting the server
 - useful during active development
 
-**mcp tool parameters:**
+**mcp tools:**
 
-when calling the `query_repositories` tool, ai agents can pass:
+the mcp server exposes four tools for ai agents:
+
+| tool                 | description                              |
+| -------------------- | ---------------------------------------- |
+| `query_repositories` | semantic search across all indexed repos |
+| `list_indexes`       | list all available indexes with metadata |
+| `get_index_stats`    | detailed statistics for a specific index |
+| `search_by_file`     | get all chunks from a specific file path |
+
+**query_repositories parameters:**
 
 - `query` (required): the question to ask
 - `top_k` (optional): number of chunks to retrieve (default: 3)
@@ -330,6 +358,14 @@ when calling the `query_repositories` tool, ai agents can pass:
     better answers)
   - `false`: returns raw chunks only (faster, cheaper, lets the calling agent
     synthesize)
+
+**get_index_stats parameters:**
+
+- `name` (required): the index name (e.g., 'nats-server', 'docs')
+
+**search_by_file parameters:**
+
+- `path` (required): file path to search for (can be partial, e.g., 'server.go')
 
 **ai agent integration:**
 
