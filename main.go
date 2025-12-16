@@ -200,14 +200,14 @@ func init() {
 
 	// index command flags
 	indexCmd.Flags().StringVar(&srcPath, "src", "", "source directory or URL to index (required)")
-	indexCmd.Flags().BoolVar(&useCode, "code", false, "index code files (.go, .js, .ts, etc)")
-	indexCmd.Flags().BoolVar(&useDocs, "docs", false, "index documentation files (.md)")
+	indexCmd.Flags().BoolVar(&useCode, "code", true, "index code files (.go, .js, .ts, etc) [default: true]")
+	indexCmd.Flags().BoolVar(&useDocs, "docs", true, "index documentation files (.md) [default: true]")
 	indexCmd.Flags().StringVar(&outPath, "out", "", "exact output path (e.g., indexes/myindex.lrindex)")
 	indexCmd.Flags().StringVar(&outName, "out-name", "", "output name (saved as indexes/{name}_YYYYMMDD.lrindex)")
 	indexCmd.Flags().BoolVar(&dryRun, "dry-run", false, "show what would be indexed without actually indexing")
 	indexCmd.Flags().Int64Var(&maxFileSize, "max-file-size", 100*1024, "maximum file size in bytes (default 100KB)")
 	indexCmd.Flags().BoolVar(&splitLarge, "split-large", false, "split large files into sections instead of skipping them")
-	indexCmd.Flags().BoolVar(&includeTests, "include-tests", false, "include test files (often contain useful usage examples)")
+	indexCmd.Flags().BoolVar(&includeTests, "include-tests", true, "include test files (useful usage examples) [default: true]")
 	indexCmd.Flags().BoolVar(&updateIndex, "update", false, "incrementally update existing index (only re-index changed files)")
 	indexCmd.Flags().BoolVar(&useGit, "git", false, "use git to detect changes (default: file mtime)")
 	indexCmd.MarkFlagRequired("src")

@@ -138,7 +138,7 @@ these flags work with any command:
 lr query "how does auth work?" --embedding-model voyage --model opus
 
 # use openai for everything
-lr index --src ./repo --code --out-name repo --embedding-model openai --model gpt-4o
+lr index --src ./repo --out-name repo --embedding-model openai --model gpt-4o
 ```
 
 ## commands
@@ -152,41 +152,47 @@ create searchable vector stores from code and documentation.
 **basic usage:**
 
 ```bash
-lr index --src /path/to/repo --code --out-name myproject
+lr index --src /path/to/repo --out-name myproject
 ```
 
 **flags:**
 
 - `--src` (required): source directory to index
-- `--code`: index code files (.go, .js, .ts, .jsx, .tsx, .templ)
-- `--docs`: index markdown documentation (.md)
+- `--code`: index code files (.go, .js, .ts, .jsx, .tsx, .templ) [default: true]
+- `--docs`: index markdown documentation (.md) [default: true]
+- `--include-tests`: include test files (useful for usage examples) [default: true]
 - `--out`: exact output path (e.g., `vectorstore/custom.json`)
 - `--out-name`: output name with auto-timestamp (e.g., `myproject` →
   `vectorstore/myproject_20250109.json`)
 - `--dry-run`: preview what would be indexed without actually indexing
 - `--max-file-size`: maximum file size in bytes (default: 100KB)
 - `--split-large`: split large files into sections instead of skipping
-- `--include-tests`: include test files (useful for usage examples)
 - `--update`: incrementally update existing index (only re-index changed files)
 - `--git`: use git to detect changes (default: file mtime)
 
 **examples:**
 
 ```bash
-# index code only
-lr index --src ./myproject --code --out-name myproject
+# index code, docs, and tests (default)
+lr index --src ./myproject --out-name myproject
 
-# index both code and docs
-lr index --src ./myproject --code --docs --out-name myproject
+# index code only (no docs)
+lr index --src ./myproject --docs=false --out-name myproject
+
+# index docs only (no code)
+lr index --src ./myproject --code=false --out-name myproject
+
+# exclude test files
+lr index --src ./myproject --include-tests=false --out-name myproject
 
 # index with custom file size limit
-lr index --src ./large-repo --code --max-file-size 200000 --split-large --out-name largerepo
+lr index --src ./large-repo --max-file-size 200000 --split-large --out-name largerepo
 
 # dry run to see what would be indexed
-lr index --src ./myproject --code --docs --dry-run
+lr index --src ./myproject --dry-run
 
 # incrementally update an existing index (only changed files)
-lr index --src ./myproject --code --out-name myproject --update
+lr index --src ./myproject --out-name myproject --update
 ```
 
 **output:** creates compressed index at
@@ -678,10 +684,10 @@ index your company's internal documentation and code for team-wide search.
 **example workflow:**
 
 ```bash
-# index your internal repos
-lr index --src ~/company/backend --code --out-name backend
-lr index --src ~/company/docs --docs --out-name internal-docs
-lr index --src ~/company/frontend --code --out-name frontend
+# index your internal repos (code, docs, tests included by default)
+lr index --src ~/company/backend --out-name backend
+lr index --src ~/company/docs --out-name internal-docs
+lr index --src ~/company/frontend --out-name frontend
 
 # query across all repos
 lr query "authentication flow" --top-k 5
@@ -788,13 +794,13 @@ lr query "examples of error handling patterns"
 
 ```bash
 # index nats go client
-lr index --src ~/code/nats.go --code --out-name nats-go
+lr index --src ~/code/nats.go --out-name nats-go
 
 # index nats.js client
-lr index --src ~/code/nats.js --code --out-name nats-js
+lr index --src ~/code/nats.js --out-name nats-js
 
 # index nats documentation
-lr index --src ~/code/nats.docs --docs --out-name docs
+lr index --src ~/code/nats.docs --out-name docs
 
 # list what's indexed
 lr list
