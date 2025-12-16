@@ -17,6 +17,35 @@ type Document struct {
 	Metadata map[string]string
 }
 
+// ShouldExcludeFile returns true if the file should be excluded from indexing
+func ShouldExcludeFile(path string) bool {
+	baseName := filepath.Base(path)
+	lowerName := strings.ToLower(baseName)
+	lowerPath := strings.ToLower(path)
+
+	// minified, bundled, and generated files
+	if strings.HasSuffix(lowerName, ".min.js") || strings.HasSuffix(lowerName, ".min.css") ||
+		strings.HasSuffix(lowerName, ".bundle.js") || strings.HasSuffix(lowerName, ".map") ||
+		lowerName == "bundle.js" || lowerName == "vendor.js" ||
+		strings.HasSuffix(lowerName, ".chunk.js") ||
+		lowerName == "package-lock.json" || lowerName == "yarn.lock" ||
+		lowerName == "pnpm-lock.yaml" || lowerName == "go.sum" {
+		return true
+	}
+
+	// common build artifact directories
+	if strings.Contains(lowerPath, "/dist/") ||
+		strings.Contains(lowerPath, "/bundles/") ||
+		strings.Contains(lowerPath, "/out/") ||
+		strings.Contains(lowerPath, "/.next/") ||
+		strings.Contains(lowerPath, "/resources/styles/") ||
+		(strings.Contains(lowerPath, "/resources/static/") && strings.HasSuffix(lowerName, ".js")) {
+		return true
+	}
+
+	return false
+}
+
 // LoadResult contains documents and metadata about the loading process
 type LoadResult struct {
 	Documents    []Document
@@ -70,6 +99,16 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 		// check gitignore for files only - don't skip directories based on gitignore
 		// because allowlist patterns (like "* then !*.go") need to check actual files
 		if gitignore != nil && !d.IsDir() && gitignore.MatchesPath(relPath) {
+			info, _ := d.Info()
+			size := int64(0)
+			if info != nil {
+				size = info.Size()
+			}
+			result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
+				Path:   relPath,
+				Reason: "gitignore",
+				Size:   size,
+			})
 			return nil
 		}
 
@@ -124,6 +163,16 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 			result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
 				Path:   relPath,
 				Reason: "test file",
+				Size:   info.Size(),
+			})
+			return nil
+		}
+
+		// skip minified, bundled, and generated files
+		if ShouldExcludeFile(baseName) {
+			result.SkippedFiles = append(result.SkippedFiles, SkippedFile{
+				Path:   relPath,
+				Reason: "minified/bundled/generated file",
 				Size:   info.Size(),
 			})
 			return nil

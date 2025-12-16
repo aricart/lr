@@ -87,6 +87,30 @@ func (vs *VectorStore) RemoveBySource(paths []string) int {
 	return removed
 }
 
+// RemoveExcludedFiles removes chunks from files that should be excluded (minified, bundled, etc.)
+func (vs *VectorStore) RemoveExcludedFiles() (removed int, files []string) {
+	newChunks := make([]Chunk, 0, len(vs.Chunks))
+	newEmbeddings := make([][]float64, 0, len(vs.Embeddings))
+	removedFiles := make(map[string]bool)
+
+	for i, chunk := range vs.Chunks {
+		if ShouldExcludeFile(chunk.Source) {
+			if !removedFiles[chunk.Source] {
+				files = append(files, chunk.Source)
+				removedFiles[chunk.Source] = true
+			}
+			removed++
+		} else {
+			newChunks = append(newChunks, chunk)
+			newEmbeddings = append(newEmbeddings, vs.Embeddings[i])
+		}
+	}
+
+	vs.Chunks = newChunks
+	vs.Embeddings = newEmbeddings
+	return removed, files
+}
+
 // Search finds the most similar chunks to the query embedding
 func (vs *VectorStore) Search(queryEmbedding []float64, topK int) []SearchResult {
 	var results []SearchResult
