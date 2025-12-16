@@ -185,25 +185,39 @@ func runReviewStart(_ *cobra.Command, _ []string) error {
 	}
 	fmt.Printf("created %d chunks\n", len(chunks))
 
-	// create embeddings
-	fmt.Println("generating embeddings with ollama...")
+	// create embeddings using batch API for faster indexing
+	fmt.Println("generating embeddings with ollama (batch mode)...")
 	store := NewVectorStore()
 	store.Metadata.SourcePath = projectPath
 	store.Metadata.ReviewIndex = true
 	store.Metadata.EmbeddingModel = embModel
 
-	for i, chunk := range chunks {
-		embedding, err := ollamaClient.GetEmbedding(chunk.Text)
-		if err != nil {
-			return fmt.Errorf("failed to get embedding for chunk %d: %w", i, err)
+	batchSize := 50
+	for i := 0; i < len(chunks); i += batchSize {
+		end := i + batchSize
+		if end > len(chunks) {
+			end = len(chunks)
+		}
+		batch := chunks[i:end]
+
+		// collect texts for batch embedding
+		texts := make([]string, len(batch))
+		for j, chunk := range batch {
+			texts[j] = chunk.Text
 		}
 
-		store.Add(chunk, embedding)
+		embeddings, err := ollamaClient.GetBatchEmbeddings(texts)
+		if err != nil {
+			return fmt.Errorf("failed to get embeddings for batch starting at %d: %w", i, err)
+		}
+
+		// add chunks with their embeddings
+		for j, chunk := range batch {
+			store.Add(chunk, embeddings[j])
+		}
 
 		// progress indicator
-		if (i+1)%10 == 0 || i == len(chunks)-1 {
-			fmt.Printf("\r  embedded %d/%d chunks", i+1, len(chunks))
-		}
+		fmt.Printf("\r  embedded %d/%d chunks", end, len(chunks))
 	}
 	fmt.Println()
 
@@ -416,6 +430,10 @@ func startWatching(session *ReviewSession, store *VectorStore, indexPath string,
 
 		fmt.Printf("\nupdating %d file(s)...\n", len(files))
 
+		// collect all chunks from all files for batch embedding
+		var allChunks []Chunk
+		fileChunkCounts := make(map[string]int)
+
 		for _, filePath := range files {
 			// check if file still exists
 			info, err := os.Stat(filePath)
@@ -456,17 +474,39 @@ func startWatching(session *ReviewSession, store *VectorStore, indexPath string,
 				continue
 			}
 
-			// generate embeddings for new chunks
-			for _, chunk := range chunks {
-				embedding, err := ollamaClient.GetEmbedding(chunk.Text)
+			allChunks = append(allChunks, chunks...)
+			fileChunkCounts[filepath.Base(filePath)] = len(chunks)
+		}
+
+		// batch embed all chunks (using same batch size as initial indexing)
+		if len(allChunks) > 0 {
+			batchSize := 50
+			for i := 0; i < len(allChunks); i += batchSize {
+				end := i + batchSize
+				if end > len(allChunks) {
+					end = len(allChunks)
+				}
+				batch := allChunks[i:end]
+
+				texts := make([]string, len(batch))
+				for j, chunk := range batch {
+					texts[j] = chunk.Text
+				}
+
+				embeddings, err := ollamaClient.GetBatchEmbeddings(texts)
 				if err != nil {
-					fmt.Printf("  error embedding %s: %v\n", filepath.Base(filePath), err)
+					fmt.Printf("  error batch embedding: %v\n", err)
 					continue
 				}
-				store.Add(chunk, embedding)
+
+				for j, chunk := range batch {
+					store.Add(chunk, embeddings[j])
+				}
 			}
 
-			fmt.Printf("  updated: %s (%d chunks)\n", filepath.Base(filePath), len(chunks))
+			for file, count := range fileChunkCounts {
+				fmt.Printf("  updated: %s (%d chunks)\n", file, count)
+			}
 		}
 
 		// save updated index
