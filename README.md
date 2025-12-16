@@ -512,7 +512,7 @@ lr review start
 **requirements:**
 
 - [ollama](https://ollama.ai) installed locally
-- `ANTHROPIC_API_KEY` set (for chat synthesis, not needed for embeddings)
+- no api keys needed (uses local embeddings only)
 
 **example workflow with claude code:**
 
