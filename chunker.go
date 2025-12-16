@@ -44,8 +44,8 @@ func ChunkDocument(doc Document, maxChunkSize int) []Chunk {
 		// if section is too large even for aggressive splitting, truncate it
 		// openai embedding limit is 8192 tokens, we use 5000 to be very safe
 		if estimatedTokens > 5000 {
-			// aggressively split by lines
-			subChunks := splitByLines(section, 16000) // ~4000 tokens per chunk
+			// aggressively split by lines (~2000 tokens per chunk for safety)
+			subChunks := splitByLines(section, 8000)
 			for j, subChunk := range subChunks {
 				chunk := Chunk{
 					Text:   subChunk,
@@ -125,6 +125,19 @@ func splitByParagraphs(content string, maxSize int) []string {
 	var currentChunk strings.Builder
 
 	for _, para := range paragraphs {
+		// if single paragraph is too large, split it by lines first
+		if len(para) > maxSize {
+			// save current chunk first
+			if currentChunk.Len() > 0 {
+				chunks = append(chunks, strings.TrimSpace(currentChunk.String()))
+				currentChunk.Reset()
+			}
+			// split the large paragraph by lines
+			subChunks := splitByLines(para, maxSize)
+			chunks = append(chunks, subChunks...)
+			continue
+		}
+
 		// if adding this paragraph exceeds max size, save current chunk
 		if currentChunk.Len()+len(para)+2 > maxSize && currentChunk.Len() > 0 {
 			chunks = append(chunks, strings.TrimSpace(currentChunk.String()))
@@ -133,12 +146,6 @@ func splitByParagraphs(content string, maxSize int) []string {
 
 		currentChunk.WriteString(para)
 		currentChunk.WriteString("\n\n")
-
-		// if single paragraph is too large, split it anyway
-		if currentChunk.Len() > maxSize {
-			chunks = append(chunks, strings.TrimSpace(currentChunk.String()))
-			currentChunk.Reset()
-		}
 	}
 
 	// add last chunk
@@ -156,6 +163,24 @@ func splitByLines(content string, maxSize int) []string {
 	var currentChunk strings.Builder
 
 	for _, line := range lines {
+		// if single line is too large, split it by characters
+		if len(line) > maxSize {
+			// save current chunk first
+			if currentChunk.Len() > 0 {
+				chunks = append(chunks, currentChunk.String())
+				currentChunk.Reset()
+			}
+			// split the long line into smaller pieces
+			for i := 0; i < len(line); i += maxSize {
+				end := i + maxSize
+				if end > len(line) {
+					end = len(line)
+				}
+				chunks = append(chunks, line[i:end])
+			}
+			continue
+		}
+
 		// if adding this line exceeds max size, save current chunk
 		if currentChunk.Len()+len(line)+1 > maxSize && currentChunk.Len() > 0 {
 			chunks = append(chunks, currentChunk.String())
