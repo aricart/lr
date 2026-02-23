@@ -1081,7 +1081,7 @@ func indexSingleSource(llm LLMClient, srcPath, outPath string, loader func(strin
 
 	for i := startIdx; i < len(chunks); i++ {
 		chunk := chunks[i]
-		embedding, err := llm.GetEmbedding(chunk.Text)
+		embedding, err := getEmbeddingWithRetry(llm, chunk.Text, 3)
 		if err != nil {
 			return fmt.Errorf("failed to get embedding for chunk %d (size: %d chars, ~%d tokens): %w",
 				i, len(chunk.Text), len(chunk.Text)/4, err)
@@ -1327,7 +1327,7 @@ func runIncrementalIndexWithLLM(llm LLMClient, finalOutPath string) error {
 			)
 
 			for _, chunk := range newChunks {
-				embedding, err := llm.GetEmbedding(chunk.Text)
+				embedding, err := getEmbeddingWithRetry(llm, chunk.Text, 3)
 				if err != nil {
 					return fmt.Errorf("failed to get embedding: %w", err)
 				}
