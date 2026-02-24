@@ -27,6 +27,13 @@ func (f *failNTimesClient) Chat(_ []Message) (string, error) {
 
 func noopSleep(_ time.Duration) {}
 
+// testNetError implements net.Error for testing network error retries.
+type testNetError struct{ msg string }
+
+func (e *testNetError) Error() string   { return e.msg }
+func (e *testNetError) Timeout() bool   { return false }
+func (e *testNetError) Temporary() bool { return true }
+
 func TestGetEmbeddingWithRetry_Success(t *testing.T) {
 	client := &failNTimesClient{failures: 0}
 	embedding, err := doEmbeddingWithRetry(client, "test", 3, noopSleep)
@@ -44,7 +51,7 @@ func TestGetEmbeddingWithRetry_Success(t *testing.T) {
 func TestGetEmbeddingWithRetry_RetryThenSuccess(t *testing.T) {
 	client := &failNTimesClient{
 		failures: 1,
-		err:      fmt.Errorf("500 Internal Server Error"),
+		err:      &APIError{StatusCode: 500, Status: "500 Internal Server Error"},
 	}
 	embedding, err := doEmbeddingWithRetry(client, "test", 3, noopSleep)
 	if err != nil {
@@ -61,7 +68,7 @@ func TestGetEmbeddingWithRetry_RetryThenSuccess(t *testing.T) {
 func TestGetEmbeddingWithRetry_NonRetryableError(t *testing.T) {
 	client := &failNTimesClient{
 		failures: 3,
-		err:      fmt.Errorf("401 Unauthorized"),
+		err:      &APIError{StatusCode: 401, Status: "401 Unauthorized"},
 	}
 	_, err := doEmbeddingWithRetry(client, "test", 3, noopSleep)
 	if err == nil {
@@ -75,7 +82,7 @@ func TestGetEmbeddingWithRetry_NonRetryableError(t *testing.T) {
 func TestGetEmbeddingWithRetry_ExhaustsAttempts(t *testing.T) {
 	client := &failNTimesClient{
 		failures: 5,
-		err:      fmt.Errorf("503 Service Unavailable"),
+		err:      &APIError{StatusCode: 503, Status: "503 Service Unavailable"},
 	}
 	_, err := doEmbeddingWithRetry(client, "test", 3, noopSleep)
 	if err == nil {
@@ -90,29 +97,46 @@ func TestGetEmbeddingWithRetry_ExhaustsAttempts(t *testing.T) {
 	}
 }
 
+func TestGetEmbeddingWithRetry_NetworkError(t *testing.T) {
+	client := &failNTimesClient{
+		failures: 1,
+		err:      &testNetError{msg: "connection refused"},
+	}
+	embedding, err := doEmbeddingWithRetry(client, "test", 3, noopSleep)
+	if err != nil {
+		t.Fatalf("expected success after retry, got: %v", err)
+	}
+	if len(embedding) != 3 {
+		t.Fatalf("expected 3-dim embedding, got %d", len(embedding))
+	}
+	if client.callCount != 2 {
+		t.Fatalf("expected 2 calls, got %d", client.callCount)
+	}
+}
+
 func TestIsRetryableError(t *testing.T) {
 	tests := []struct {
 		name     string
-		err      string
+		err      error
 		expected bool
 	}{
-		{"500 error", "500 Internal Server Error", true},
-		{"502 error", "502 Bad Gateway", true},
-		{"503 error", "503 Service Unavailable", true},
-		{"504 error", "504 Gateway Timeout", true},
-		{"429 rate limit", "429 Too Many Requests", true},
-		{"rate limit text", "rate limit exceeded", true},
-		{"401 unauthorized", "401 Unauthorized", false},
-		{"403 forbidden", "403 Forbidden", false},
-		{"400 bad request", "400 Bad Request", false},
-		{"generic error", "connection refused", false},
+		{"500 error", &APIError{StatusCode: 500}, true},
+		{"502 error", &APIError{StatusCode: 502}, true},
+		{"503 error", &APIError{StatusCode: 503}, true},
+		{"504 error", &APIError{StatusCode: 504}, true},
+		{"429 rate limit", &APIError{StatusCode: 429}, true},
+		{"401 unauthorized", &APIError{StatusCode: 401}, false},
+		{"403 forbidden", &APIError{StatusCode: 403}, false},
+		{"400 bad request", &APIError{StatusCode: 400}, false},
+		{"network error", &testNetError{msg: "connection refused"}, true},
+		{"generic error", fmt.Errorf("some error"), false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isRetryableError(fmt.Errorf("%s", tt.err))
+			got := isRetryableError(tt.err)
 			if got != tt.expected {
-				t.Errorf("isRetryableError(%q) = %v, want %v", tt.err, got, tt.expected)
+				t.Errorf("isRetryableError(%v) = %v, want %v", tt.err, got, tt.expected)
 			}
 		})
 	}

@@ -1,10 +1,22 @@
 package main
 
 import (
+	"errors"
 	"fmt"
-	"strings"
+	"net"
 	"time"
 )
+
+// APIError represents an HTTP API error with a status code.
+type APIError struct {
+	StatusCode int
+	Status     string
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("api error: %s - %s", e.Status, e.Body)
+}
 
 // LLMClient is an interface for different LLM providers
 type LLMClient interface {
@@ -37,22 +49,27 @@ func doEmbeddingWithRetry(client LLMClient, text string, maxAttempts int, sleep 
 	return nil, fmt.Errorf("failed after %d attempts: %w", maxAttempts, lastErr)
 }
 
-// isRetryableError returns true for transient server errors and rate limits.
+// isRetryableError returns true for transient server/network errors and rate limits.
 func isRetryableError(err error) bool {
-	msg := err.Error()
-	return strings.Contains(msg, "500") ||
-		strings.Contains(msg, "502") ||
-		strings.Contains(msg, "503") ||
-		strings.Contains(msg, "504") ||
-		strings.Contains(msg, "429") ||
-		strings.Contains(msg, "rate limit")
+	var apiErr *APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.StatusCode {
+		case 429, 500, 502, 503, 504:
+			return true
+		}
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr)
 }
 
 // ensure all clients implement the interface
-var _ LLMClient = (*OpenAIClient)(nil)
-var _ LLMClient = (*HybridClient)(nil)
-var _ LLMClient = (*VoyageClaudeClient)(nil)
-var _ LLMClient = (*OllamaClaudeClient)(nil)
+var (
+	_ LLMClient = (*OpenAIClient)(nil)
+	_ LLMClient = (*HybridClient)(nil)
+	_ LLMClient = (*VoyageClaudeClient)(nil)
+	_ LLMClient = (*OllamaClaudeClient)(nil)
+)
 
 // HybridClient uses OpenAI for embeddings and Claude for chat
 type HybridClient struct {

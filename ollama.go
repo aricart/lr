@@ -73,7 +73,7 @@ func (o *OllamaClient) GetEmbedding(text string) ([]float64, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ollama error: %s - %s", resp.Status, string(bodyBytes))
+		return nil, &APIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(bodyBytes)}
 	}
 
 	var embResp OllamaEmbedResponse
@@ -119,7 +119,7 @@ func (o *OllamaClient) GetBatchEmbeddings(texts []string) ([][]float64, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("ollama error: %s - %s", resp.Status, string(bodyBytes))
+		return nil, &APIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(bodyBytes)}
 	}
 
 	var embResp OllamaEmbedResponse

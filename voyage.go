@@ -68,7 +68,7 @@ func (v *VoyageClient) GetEmbedding(text string) ([]float64, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("voyage ai error: %s - %s", resp.Status, string(bodyBytes))
+		return nil, &APIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(bodyBytes)}
 	}
 
 	var embResp VoyageEmbeddingResponse
