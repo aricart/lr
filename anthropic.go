@@ -104,7 +104,7 @@ func (c *AnthropicClient) Chat(messages []Message) (string, error) {
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("anthropic api error: %s - %s", resp.Status, string(bodyBytes))
+		return "", &APIError{StatusCode: resp.StatusCode, Status: resp.Status, Body: string(bodyBytes)}
 	}
 
 	var chatResp AnthropicChatResponse
