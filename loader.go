@@ -58,9 +58,9 @@ func LoadMarkdownFiles(rootDir string) ([]Document, error) {
 	return LoadFilesByExtensions(rootDir, []string{".md"}, "markdown")
 }
 
-// LoadCodeFiles loads code files (Go, JavaScript, TypeScript, Python, Java, C) from the given directory
+// LoadCodeFiles loads code files (Go, JavaScript, TypeScript, Python, Java, C, Rust) from the given directory
 func LoadCodeFiles(rootDir string) ([]Document, error) {
-	return LoadFilesByExtensions(rootDir, []string{".go", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".h"}, "code")
+	return LoadFilesByExtensions(rootDir, []string{".go", ".js", ".ts", ".jsx", ".tsx", ".py", ".java", ".c", ".h", ".rs"}, "code")
 }
 
 // LoadFilesByExtensions loads files with specific extensions from the given directory
@@ -199,6 +199,8 @@ func LoadFilesByExtensionsWithStatsAndSplit(rootDir string, extensions []string,
 			fileType = "java"
 		} else if strings.HasSuffix(path, ".c") || strings.HasSuffix(path, ".h") {
 			fileType = "c"
+		} else if strings.HasSuffix(path, ".rs") {
+			fileType = "rust"
 		}
 
 		// handle large files
@@ -271,6 +273,8 @@ func LoadSpecificFiles(rootDir string, files []string, docType string, maxFileSi
 			fileType = "java"
 		} else if strings.HasSuffix(path, ".c") || strings.HasSuffix(path, ".h") {
 			fileType = "c"
+		} else if strings.HasSuffix(path, ".rs") {
+			fileType = "rust"
 		} else if strings.HasSuffix(path, ".md") {
 			fileType = "markdown"
 		}

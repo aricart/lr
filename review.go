@@ -164,7 +164,7 @@ func runReviewStart(_ *cobra.Command, _ []string) error {
 	indexPath := filepath.Join(reviewDir, indexName+".lrindex")
 
 	// load files (code + docs)
-	extensions := []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".md"}
+	extensions := []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs", ".md"}
 	fmt.Printf("scanning files...\n")
 	loadResult, err := LoadFilesByExtensionsWithStatsAndSplit(projectPath, extensions, "mixed", 100*1024, false, true)
 	if err != nil {
@@ -409,7 +409,7 @@ func startWatching(session *ReviewSession, store *VectorStore, indexPath string,
 	// track extensions we care about
 	watchedExts := map[string]bool{
 		".go": true, ".js": true, ".ts": true, ".jsx": true,
-		".tsx": true, ".templ": true, ".md": true,
+		".tsx": true, ".templ": true, ".rs": true, ".md": true,
 	}
 
 	// debounce changes (collect changes over 500ms before processing)

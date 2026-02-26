@@ -429,13 +429,13 @@ func runIndex(_ *cobra.Command, _ []string) error {
 	var extensions []string
 	var docType string
 	if useCode && useDocs {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".md"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs", ".md"}
 		docType = "mixed"
 	} else if useDocs {
 		extensions = []string{".md"}
 		docType = "markdown"
 	} else {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs"}
 		docType = "code"
 	}
 
@@ -751,7 +751,7 @@ func runUpdateAll(_ *cobra.Command, _ []string) error {
 		}
 
 		// determine extensions (default to code)
-		extensions := []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
+		extensions := []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs"}
 
 		// detect changes
 		if info.isGitRepo && vs.Metadata.LastCommit != "" {
@@ -1193,13 +1193,13 @@ func runIncrementalIndexWithLLM(llm LLMClient, finalOutPath string) error {
 	var extensions []string
 	var docType string
 	if useCode && useDocs {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".md"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs", ".md"}
 		docType = "mixed"
 	} else if useDocs {
 		extensions = []string{".md"}
 		docType = "markdown"
 	} else {
-		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ"}
+		extensions = []string{".go", ".js", ".ts", ".jsx", ".tsx", ".templ", ".rs"}
 		docType = "code"
 	}
 
