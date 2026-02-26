@@ -24,7 +24,7 @@ func ChunkDocument(doc Document, maxChunkSize int) []Chunk {
 		// split by markdown headers
 		sections = splitByHeaders(doc.Content)
 	} else if docType == "go" || docType == "javascript" || docType == "typescript" ||
-		docType == "python" || docType == "java" || docType == "c" {
+		docType == "python" || docType == "java" || docType == "c" || docType == "rust" {
 		// split code by functions/methods
 		sections = splitByFunctions(doc.Content)
 	} else {
@@ -213,13 +213,19 @@ func splitByFunctions(content string) []string {
 		// detect function start (simple heuristic)
 		// go: func keyword
 		// js/ts: function keyword, arrow functions, method definitions
+		// rust: fn, pub fn, impl, pub struct, pub enum
 		// python: def keyword
 		// java: public/private/protected methods, class definitions
 		// c: function definitions with return type
 		isFunctionStart := strings.HasPrefix(trimmed, "func ") ||
 			strings.HasPrefix(trimmed, "function ") ||
+			strings.HasPrefix(trimmed, "fn ") ||
+			strings.HasPrefix(trimmed, "pub fn ") ||
 			strings.HasPrefix(trimmed, "def ") ||
 			strings.HasPrefix(trimmed, "class ") ||
+			strings.HasPrefix(trimmed, "impl ") ||
+			strings.HasPrefix(trimmed, "pub struct ") ||
+			strings.HasPrefix(trimmed, "pub enum ") ||
 			strings.HasPrefix(trimmed, "public ") ||
 			strings.HasPrefix(trimmed, "private ") ||
 			strings.HasPrefix(trimmed, "protected ") ||
